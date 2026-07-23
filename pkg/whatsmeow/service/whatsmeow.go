@@ -1278,6 +1278,17 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			}
 
 			decrypted, err := mycli.clientPointer[mycli.userID].DecryptPollVote(context.Background(), evt)
+			if err != nil && !evt.Info.SenderAlt.IsEmpty() {
+				// O JID swap (LID → número real) feito antes deste ponto quebra o
+				// AAD do AES-GCM do voto, que usa o Sender original. Retenta com
+				// o JID alternativo antes de desistir.
+				retryEvt := *evt
+				retryEvt.Info.Sender, retryEvt.Info.SenderAlt = evt.Info.SenderAlt, evt.Info.Sender
+				if d2, err2 := mycli.clientPointer[mycli.userID].DecryptPollVote(context.Background(), &retryEvt); err2 == nil {
+					mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Poll vote decrypted with SenderAlt fallback", mycli.userID)
+					decrypted, err = d2, nil
+				}
+			}
 			if err != nil {
 				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Failed to decrypt vote: %v", mycli.userID, err)
 			} else {
@@ -1286,6 +1297,24 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 					mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("- %X", option)
 
 				}
+
+				// Expõe o voto decriptado no payload do webhook — sem isso o
+				// consumidor só recebe o pollUpdateMessage cifrado e não tem
+				// como saber a opção escolhida. Os hashes são SHA-256 do texto
+				// de cada opção, então o consumidor casa contra as opções que
+				// ele próprio enviou na enquete.
+				selectedHex := make([]string, 0, len(decrypted.SelectedOptions))
+				for _, option := range decrypted.SelectedOptions {
+					selectedHex = append(selectedHex, fmt.Sprintf("%x", option))
+				}
+				pollVoteMap := map[string]interface{}{
+					"selectedOptions": selectedHex,
+				}
+				if pk := evt.Message.GetPollUpdateMessage().GetPollCreationMessageKey(); pk != nil {
+					pollVoteMap["pollMessageId"] = pk.GetID()
+				}
+				dataMap["pollVote"] = pollVoteMap
+				postMap["data"] = dataMap
 
 				// NOVO: Salvar voto no banco de dados de forma NÃO-INVASIVA
 				if mycli.pollService != nil {

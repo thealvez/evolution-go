@@ -5,6 +5,7 @@ import (
 	"context"
 	crypto_rand "crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1733,6 +1734,70 @@ func mapKeyType(keyType string) string {
 	}
 }
 
+// buildQualityControlNode returns the <quality_control> node required alongside
+// every <biz> interactive/native_flow node. Structure mirrors the reference
+// implementation in itsliaaa/baileys (lib/WABinary/generic-utils.js).
+func buildQualityControlNode() waBinary.Node {
+	decisionIDBytes := make([]byte, 20)
+	_, _ = crypto_rand.Read(decisionIDBytes)
+	return waBinary.Node{
+		Tag: "quality_control",
+		Attrs: waBinary.Attrs{
+			"decision_id": hex.EncodeToString(decisionIDBytes),
+			"source_type": "third_party",
+		},
+		Content: []waBinary.Node{{
+			Tag:   "decision_source",
+			Attrs: waBinary.Attrs{"value": "df"},
+		}},
+	}
+}
+
+// buildMixedBizAdditionalNodes returns the <biz> node injected directly in the
+// XMPP stanza — required for mobile rendering of native flow / interactive
+// messages that are not payment/order flows (buttons, lists, carousels).
+// Structure mirrors the reference implementation in itsliaaa/baileys
+// (lib/WABinary/generic-utils.js, getBizBinaryNode, commit range Jan-Feb 2026),
+// the same fork cited elsewhere in this codebase as the source for this
+// mechanism:
+//   - every non-payment button/list/carousel flow uses
+//     <interactive type="native_flow" v="1"><native_flow v="9" name="mixed"/></interactive>.
+//     "quick_reply" is a button-level name carried inside buttonParamsJson — it
+//     is NEVER the outer XML node's name attribute; only a fixed list of
+//     specialized flows (mpm, cta_catalog, send_location, ...) get a
+//     non-"mixed" name here, and quick_reply/reply buttons are not among them.
+//   - a <quality_control> sibling with a random decision_id is always required.
+//   - the <bot biz_bot="1"/> node is unrelated to buttons — it belongs to a
+//     separate "AI label" feature — and must NOT be sent here.
+func buildMixedBizAdditionalNodes() []waBinary.Node {
+	bizNode := waBinary.Node{
+		Tag: "biz",
+		Attrs: waBinary.Attrs{
+			"actual_actors":   "2",
+			"host_storage":    "2",
+			"privacy_mode_ts": strconv.FormatInt(time.Now().Unix(), 10),
+		},
+		Content: []waBinary.Node{
+			{
+				Tag: "interactive",
+				Attrs: waBinary.Attrs{
+					"type": "native_flow",
+					"v":    "1",
+				},
+				Content: []waBinary.Node{{
+					Tag: "native_flow",
+					Attrs: waBinary.Attrs{
+						"v":    "9",
+						"name": "mixed",
+					},
+				}},
+			},
+			buildQualityControlNode(),
+		},
+	}
+	return []waBinary.Node{bizNode}
+}
+
 func (s *sendService) SendButton(data *ButtonStruct, instance *instance_model.Instance) (*MessageSendStruct, error) {
 	client, err := s.ensureClientConnected(instance.Id)
 	if err != nil {
@@ -1998,66 +2063,25 @@ func (s *sendService) SendButton(data *ButtonStruct, instance *instance_model.In
 		msgType = "InteractiveMessage"
 	}
 
-	// Build biz/bot nodes injected directly in the XMPP stanza — required for mobile rendering.
-	// Reply-only buttons get <biz><buttons/></biz>; CTA/Pix get <biz><interactive type="native_flow" v="1"><native_flow name="X"/></interactive></biz>.
-	// The <bot biz_bot="1"/> node is required for 1:1 chats (skipped on groups).
-	var bizInteractiveContent waBinary.Node
-	if hasReply && !hasOtherTypes && !hasPix {
-		bizInteractiveContent = waBinary.Node{
-			Tag: "interactive",
+	// Build the <biz> node injected directly in the XMPP stanza — required for mobile
+	// rendering of native flow / interactive messages. Payment/order flows use a FLAT
+	// native_flow_name attribute directly on <biz> with no nested <interactive> node;
+	// every other button flow (reply-only or mixed CTA) reuses buildMixedBizAdditionalNodes
+	// (see its doc comment for the full rationale — same source as SendCarousel below).
+	var bizNodes []waBinary.Node
+	if hasPix {
+		bizNodes = []waBinary.Node{{
+			Tag: "biz",
 			Attrs: waBinary.Attrs{
-				"type": "native_flow",
-				"v":    "1",
+				"actual_actors":    "2",
+				"host_storage":     "2",
+				"privacy_mode_ts":  strconv.FormatInt(time.Now().Unix(), 10),
+				"native_flow_name": "payment_info",
 			},
-			Content: []waBinary.Node{{
-				Tag: "native_flow",
-				Attrs: waBinary.Attrs{
-					"name": "quick_reply",
-				},
-			}},
-		}
-	} else if hasPix {
-		bizInteractiveContent = waBinary.Node{
-			Tag: "interactive",
-			Attrs: waBinary.Attrs{
-				"type": "native_flow",
-				"v":    "1",
-			},
-			Content: []waBinary.Node{{
-				Tag: "native_flow",
-				Attrs: waBinary.Attrs{
-					"name": "payment_info",
-				},
-			}},
-		}
+			Content: []waBinary.Node{buildQualityControlNode()},
+		}}
 	} else {
-		// Mixed CTA buttons (url/copy/call) — name="mixed" is the WhatsApp convention.
-		bizInteractiveContent = waBinary.Node{
-			Tag: "interactive",
-			Attrs: waBinary.Attrs{
-				"type": "native_flow",
-				"v":    "1",
-			},
-			Content: []waBinary.Node{{
-				Tag: "native_flow",
-				Attrs: waBinary.Attrs{
-					"name": "mixed",
-				},
-			}},
-		}
-	}
-
-	bizNodes := []waBinary.Node{
-		{
-			Tag:     "biz",
-			Content: []waBinary.Node{bizInteractiveContent},
-		},
-	}
-	if !strings.Contains(data.Number, "@g.us") {
-		bizNodes = append(bizNodes, waBinary.Node{
-			Tag:   "bot",
-			Attrs: waBinary.Attrs{"biz_bot": "1"},
-		})
+		bizNodes = buildMixedBizAdditionalNodes()
 	}
 
 	// Route through centralized SendMessage for ContextInfo, webhooks, quotes, mentions.
@@ -3106,9 +3130,15 @@ func (s *sendService) SendCarousel(data *CarouselStruct, instance *instance_mode
 		},
 	}
 
+	// <biz> node required for mobile rendering — same gap that made buttons return
+	// 200 OK but never render (see buildMixedBizAdditionalNodes doc comment).
+	// SendCarousel previously sent no AdditionalNodes at all.
+	bizNodes := buildMixedBizAdditionalNodes()
+
 	message, err := s.SendMessage(instance, msg, "InteractiveMessage", &SendDataStruct{
-		Number: data.Number,
-		Delay:  data.Delay,
+		Number:          data.Number,
+		Delay:           data.Delay,
+		AdditionalNodes: &bizNodes,
 	})
 
 	if err != nil {

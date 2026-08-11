@@ -76,6 +76,42 @@ type clientVersion struct {
 	Patch int
 }
 
+// sqlStoreState owns the single whatsmeow SQL container used by this process.
+// A Container is designed to hold multiple isolated WhatsApp device sessions,
+// so creating one per reconnect only creates redundant database pools.
+type sqlStoreState struct {
+	mu        sync.Mutex
+	container *sqlstore.Container
+}
+
+// reconnectCoordinator prevents overlapping reconnects for the same instance.
+// Different instances remain independent and can reconnect in parallel.
+type reconnectCoordinator struct {
+	mu     sync.Mutex
+	active map[string]struct{}
+}
+
+func (c *reconnectCoordinator) run(instanceID string, reconnect func() error) (bool, error) {
+	c.mu.Lock()
+	if c.active == nil {
+		c.active = make(map[string]struct{})
+	}
+	if _, exists := c.active[instanceID]; exists {
+		c.mu.Unlock()
+		return false, nil
+	}
+	c.active[instanceID] = struct{}{}
+	c.mu.Unlock()
+
+	defer func() {
+		c.mu.Lock()
+		delete(c.active, instanceID)
+		c.mu.Unlock()
+	}()
+
+	return true, reconnect()
+}
+
 type whatsmeowService struct {
 	instanceRepository instance_repository.InstanceRepository
 	authDB             *sql.DB
@@ -97,6 +133,8 @@ type whatsmeowService struct {
 	natsProducer       producer_interfaces.Producer
 	loggerWrapper      *logger_wrapper.LoggerManager
 	passkeyCeremony    *ceremony.Store
+	sqlStore           *sqlStoreState
+	reconnects         *reconnectCoordinator
 }
 
 type MyClient struct {
@@ -172,6 +210,20 @@ type ProxyConfig struct {
 }
 
 func (w whatsmeowService) ReconnectClient(instanceId string) error {
+	if w.reconnects == nil {
+		return w.reconnectClient(instanceId)
+	}
+
+	ran, err := w.reconnects.run(instanceId, func() error {
+		return w.reconnectClient(instanceId)
+	})
+	if !ran {
+		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Reconnection already in progress; skipping duplicate request", instanceId)
+	}
+	return err
+}
+
+func (w whatsmeowService) reconnectClient(instanceId string) error {
 	w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Starting reconnection process - simulating restart", instanceId)
 
 	// Passo 1: Limpar conexão existente se houver
@@ -301,6 +353,45 @@ func (w whatsmeowService) ForceUpdateJid(instanceId string, number string) error
 	return nil
 }
 
+func (w whatsmeowService) getSQLStoreContainer(dbLog waLog.Logger) (*sqlstore.Container, error) {
+	if w.sqlStore == nil {
+		return nil, fmt.Errorf("shared SQL store state is not initialized")
+	}
+
+	w.sqlStore.mu.Lock()
+	defer w.sqlStore.mu.Unlock()
+
+	if w.sqlStore.container != nil {
+		return w.sqlStore.container, nil
+	}
+
+	var (
+		container *sqlstore.Container
+		err       error
+	)
+	if w.config.PostgresAuthDB != "" {
+		if w.authDB == nil {
+			return nil, fmt.Errorf("shared authentication database is not initialized")
+		}
+
+		// Reuse the process-wide, bounded *sql.DB configured at startup. Do not
+		// close this container independently: authDB owns its lifecycle.
+		container = sqlstore.NewWithDB(w.authDB, "postgres", dbLog)
+		err = container.Upgrade(context.Background())
+	} else {
+		dsn := fmt.Sprintf("file:%s/dbdata/main.db?_pragma=foreign_keys(1)&_busy_timeout=5000&cache=shared&mode=rwc&_journal_mode=WAL", w.exPath)
+		container, err = sqlstore.New(context.Background(), "sqlite", dsn, dbLog)
+	}
+	if err != nil {
+		// Leave the shared slot empty so a transient database failure can be
+		// retried by the next start/reconnect attempt.
+		return nil, err
+	}
+
+	w.sqlStore.container = container
+	return container, nil
+}
+
 func (w whatsmeowService) StartClient(cd *ClientData) {
 
 	w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("Starting websocket connection to Whatsapp for user '%s'", cd.Instance.Id)
@@ -314,27 +405,14 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 		}
 	}
 
-	var container *sqlstore.Container
-
+	var dbLog waLog.Logger
 	if w.config.WaDebug != "" {
-		dbLog := waLog.Stdout("Database", w.config.WaDebug, true)
-		if w.config.PostgresAuthDB != "" {
-			container, err = sqlstore.New(context.Background(), "postgres", w.config.PostgresAuthDB, dbLog)
-		} else {
-			dsn := fmt.Sprintf("file:%s/dbdata/main.db?_pragma=foreign_keys(1)&_busy_timeout=5000&cache=shared&mode=rwc&_journal_mode=WAL", w.exPath)
-			container, err = sqlstore.New(context.Background(), "sqlite", dsn, dbLog)
-		}
-	} else {
-		if w.config.PostgresAuthDB != "" {
-			container, err = sqlstore.New(context.Background(), "postgres", w.config.PostgresAuthDB, nil)
-		} else {
-			dsn := fmt.Sprintf("file:%s/dbdata/main.db?_pragma=foreign_keys(1)&_busy_timeout=5000&cache=shared&mode=rwc&_journal_mode=WAL", w.exPath)
-			container, err = sqlstore.New(context.Background(), "sqlite", dsn, nil)
-		}
+		dbLog = waLog.Stdout("Database", w.config.WaDebug, true)
 	}
 
+	container, err := w.getSQLStoreContainer(dbLog)
 	if err != nil {
-		w.loggerWrapper.GetLogger(cd.Instance.Id).LogError("[%s] Failed to create container: %v", cd.Instance.Id, err)
+		w.loggerWrapper.GetLogger(cd.Instance.Id).LogError("[%s] Failed to initialize shared SQL store: %v", cd.Instance.Id, err)
 		return
 	}
 
@@ -2860,6 +2938,8 @@ func NewWhatsmeowService(
 		natsProducer:       natsProducer,
 		loggerWrapper:      loggerWrapper,
 		passkeyCeremony:    ceremony.NewStore(),
+		sqlStore:           &sqlStoreState{},
+		reconnects:         &reconnectCoordinator{active: make(map[string]struct{})},
 	}
 }
 

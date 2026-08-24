@@ -10,6 +10,7 @@ import (
 
 type UserHandler interface {
 	GetUser(ctx *gin.Context)
+	ResolveLID(ctx *gin.Context)
 	CheckUser(ctx *gin.Context)
 	GetAvatar(ctx *gin.Context)
 	GetContacts(ctx *gin.Context)
@@ -66,6 +67,43 @@ func (u *userHandler) GetUser(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "success", "data": uc})
+}
+
+// Resolve a LID to its phone number
+// @Summary Resolve LID
+// @Description Resolve a WhatsApp LID (privacy id, e.g. from LabelAssociationChat events) to the underlying phone number, using the local whatsmeow LID map. Returns resolved:false when the mapping isn't known locally yet — there is no remote lookup.
+// @Tags User
+// @Produce json
+// @Param lid query string true "LID, with or without the @lid suffix"
+// @Success 200 {object} gin.H "success"
+// @Failure 400 {object} gin.H "Error on validation"
+// @Failure 500 {object} gin.H "Internal server error"
+// @Router /user/resolve-lid [get]
+func (u *userHandler) ResolveLID(ctx *gin.Context) {
+	getInstance := ctx.MustGet("instance")
+
+	instance, ok := getInstance.(*instance_model.Instance)
+	if !ok {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "instance not found"})
+		return
+	}
+
+	lid := ctx.Query("lid")
+	if lid == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "lid is required"})
+		return
+	}
+
+	pn, err := u.userService.ResolveLID(lid, instance)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if pn == "" {
+		ctx.JSON(http.StatusOK, gin.H{"resolved": false, "pn": nil})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"resolved": true, "pn": pn})
 }
 
 // Check a user

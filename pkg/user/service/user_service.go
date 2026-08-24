@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
@@ -19,6 +20,7 @@ import (
 
 type UserService interface {
 	GetUser(data *CheckUserStruct, instance *instance_model.Instance) (*UserCollection, error)
+	ResolveLID(lid string, instance *instance_model.Instance) (string, error)
 	CheckUser(data *CheckUserStruct, instance *instance_model.Instance) (*CheckUserCollection, error)
 	GetAvatar(data *GetAvatarStruct, instance *instance_model.Instance) (*types.ProfilePictureInfo, error)
 	GetContacts(instance *instance_model.Instance) ([]ContactInfo, error)
@@ -191,6 +193,39 @@ func (u *userService) GetUser(data *CheckUserStruct, instance *instance_model.In
 	}
 
 	return uc, nil
+}
+
+// ResolveLID resolve um LID (identificador de privacidade do WhatsApp, usado
+// em vez do telefone real em vários eventos de app-state — ex.: LabelAssociationChat)
+// para o telefone (PN) correspondente, usando o mapeamento local que o
+// whatsmeow já mantém (whatsmeow_lid_map). Devolve "" (sem erro) se o
+// mapeamento ainda não é conhecido localmente — não existe lookup remoto.
+func (u *userService) ResolveLID(lid string, instance *instance_model.Instance) (string, error) {
+	client, err := u.ensureClientConnected(instance.Id)
+	if err != nil {
+		return "", err
+	}
+	if client.Store.LIDs == nil {
+		return "", errors.New("LID store indisponível")
+	}
+
+	user := lid
+	if idx := strings.Index(lid, "@"); idx >= 0 {
+		user = lid[:idx]
+	}
+	if user == "" {
+		return "", errors.New("lid vazio")
+	}
+
+	lidJID := types.NewJID(user, types.HiddenUserServer)
+	pn, err := client.Store.LIDs.GetPNForLID(context.Background(), lidJID)
+	if err != nil {
+		return "", err
+	}
+	if pn.IsEmpty() {
+		return "", nil
+	}
+	return pn.User, nil
 }
 
 func (u *userService) CheckUser(data *CheckUserStruct, instance *instance_model.Instance) (*CheckUserCollection, error) {

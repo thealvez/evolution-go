@@ -2100,12 +2100,24 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		postMap["event"] = "LabelEdit"
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Got label edit %+v", mycli.userID, evt.Action)
 
+		var labelColor int32
+		if evt.Action.Color != nil {
+			labelColor = *evt.Action.Color
+		}
+		var labelPredefinedID int32
+		if evt.Action.PredefinedID != nil {
+			labelPredefinedID = *evt.Action.PredefinedID
+		}
 		label := label_model.Label{
-			InstanceID:   mycli.userID,
-			LabelID:      evt.LabelID,
-			LabelName:    utils.GetStringValue(evt.Action.Name),
-			LabelColor:   fmt.Sprintf("%d", evt.Action.Color),
-			PredefinedId: fmt.Sprintf("%d", evt.Action.PredefinedID),
+			InstanceID: mycli.userID,
+			LabelID:    evt.LabelID,
+			LabelName:  utils.GetStringValue(evt.Action.Name),
+			// Achado real 2026-08-24: evt.Action.Color/PredefinedID são *int32.
+			// fmt.Sprintf("%d", ponteiro) formata o ENDEREÇO em memória, não o
+			// valor — LabelColor/PredefinedId salvos ficavam com números
+			// gigantes sem sentido (ex.: "824669761000") em vez de "0"/"1".
+			LabelColor:   fmt.Sprintf("%d", labelColor),
+			PredefinedId: fmt.Sprintf("%d", labelPredefinedID),
 		}
 
 		err := mycli.labelRepository.UpsertLabel(label)

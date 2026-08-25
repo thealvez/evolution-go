@@ -13,11 +13,11 @@ services:
       CLIENT_NAME: "evolution"
 
       # Segurança (OBRIGATÓRIO)
-      GLOBAL_API_KEY: "sua-chave-api-segura-aqui"
+      GLOBAL_API_KEY: "${GLOBAL_API_KEY:?set GLOBAL_API_KEY in .env}"
 
       # Banco de Dados PostgreSQL (RECOMENDADO)
-      POSTGRES_AUTH_DB: "postgresql://postgres:postgres@postgres:5432/evogo_auth?sslmode=disable"
-      POSTGRES_USERS_DB: "postgresql://postgres:postgres@postgres:5432/evogo_users?sslmode=disable"
+      POSTGRES_AUTH_DB: "${POSTGRES_AUTH_DB:?set POSTGRES_AUTH_DB in .env}"
+      POSTGRES_USERS_DB: "${POSTGRES_USERS_DB:?set POSTGRES_USERS_DB in .env}"
       DATABASE_SAVE_MESSAGES: "false"
 
       # Logs e Debug
@@ -72,9 +72,9 @@ services:
     container_name: evolution-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+      POSTGRES_DB: "${POSTGRES_DB:-postgres}"
     ports:
       - "5432:5432"
     volumes:

@@ -76,10 +76,10 @@ services:
     environment:
       SERVER_PORT: 4000
       CLIENT_NAME: "evolution"
-      GLOBAL_API_KEY: "SUBSTITUA-POR-UUID-FORTE"
+      GLOBAL_API_KEY: "${GLOBAL_API_KEY:?set GLOBAL_API_KEY in .env}"
 
-      POSTGRES_AUTH_DB: "postgresql://postgres:postgres@postgres:5432/evogo_auth?sslmode=disable"
-      POSTGRES_USERS_DB: "postgresql://postgres:postgres@postgres:5432/evogo_users?sslmode=disable"
+      POSTGRES_AUTH_DB: "${POSTGRES_AUTH_DB:?set POSTGRES_AUTH_DB in .env}"
+      POSTGRES_USERS_DB: "${POSTGRES_USERS_DB:?set POSTGRES_USERS_DB in .env}"
       DATABASE_SAVE_MESSAGES: "false"
 
       WADEBUG: "INFO"
@@ -100,9 +100,9 @@ services:
     container_name: postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+      POSTGRES_DB: "${POSTGRES_DB:-postgres}"
     ports:
       - "5432:5432"
     volumes:
@@ -132,10 +132,10 @@ SELECT 'Databases criados com sucesso!' as message;
 #### Deploy
 
 ```bash
-# Gerar API Key
+# Gerar API Key e salve no .env como GLOBAL_API_KEY
 uuidgen
 
-# Editar docker-compose.yml e inserir API Key
+# Configure POSTGRES_PASSWORD, POSTGRES_AUTH_DB e POSTGRES_USERS_DB no .env
 
 # Iniciar
 docker-compose up -d
@@ -160,20 +160,20 @@ services:
       - "4000:4000"
     environment:
       SERVER_PORT: 4000
-      GLOBAL_API_KEY: "SUA-CHAVE-AQUI"
+      GLOBAL_API_KEY: "${GLOBAL_API_KEY:?set GLOBAL_API_KEY in .env}"
 
-      POSTGRES_AUTH_DB: "postgresql://postgres:senha@postgres:5432/evogo_auth?sslmode=disable"
-      POSTGRES_USERS_DB: "postgresql://postgres:senha@postgres:5432/evogo_users?sslmode=disable"
+      POSTGRES_AUTH_DB: "${POSTGRES_AUTH_DB:?set POSTGRES_AUTH_DB in .env}"
+      POSTGRES_USERS_DB: "${POSTGRES_USERS_DB:?set POSTGRES_USERS_DB in .env}"
       DATABASE_SAVE_MESSAGES: "true"
 
-      AMQP_URL: "amqp://admin:admin@rabbitmq:5672/default"
+      AMQP_URL: "${AMQP_URL:?set AMQP_URL in .env}"
       AMQP_GLOBAL_ENABLED: "true"
       AMQP_GLOBAL_EVENTS: "messages.upsert,messages.update,connection.update"
       
       MINIO_ENABLED: "true"
       MINIO_ENDPOINT: "minio:9000"
-      MINIO_ACCESS_KEY: "minioadmin"
-      MINIO_SECRET_KEY: "minioadmin"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY in .env}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY in .env}"
       MINIO_BUCKET: "evolution-media"
       MINIO_USE_SSL: "false"
 
@@ -189,9 +189,9 @@ services:
     image: postgres:15-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: senha
-      POSTGRES_DB: postgres
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+      POSTGRES_DB: "${POSTGRES_DB:-postgres}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
@@ -200,9 +200,9 @@ services:
     image: rabbitmq:3-management-alpine
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: admin
-      RABBITMQ_DEFAULT_PASS: admin
-      RABBITMQ_DEFAULT_VHOST: default
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_DEFAULT_USER:?set RABBITMQ_DEFAULT_USER in .env}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_DEFAULT_PASS:?set RABBITMQ_DEFAULT_PASS in .env}"
+      RABBITMQ_DEFAULT_VHOST: "${RABBITMQ_DEFAULT_VHOST:-default}"
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -214,8 +214,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: "${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY in .env}"
+      MINIO_ROOT_PASSWORD: "${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY in .env}"
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -240,8 +240,8 @@ volumes:
 **Acessos:**
 - Evolution GO: http://localhost:4000
 - Swagger: http://localhost:4000/swagger/index.html
-- RabbitMQ: http://localhost:15672 (admin/admin)
-- MinIO: http://localhost:9001 (minioadmin/minioadmin)
+- RabbitMQ: http://localhost:15672 (`RABBITMQ_DEFAULT_USER` / `RABBITMQ_DEFAULT_PASS`)
+- MinIO: http://localhost:9001 (`MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY`)
 
 ### Configurações Avançadas
 
@@ -370,9 +370,9 @@ services:
       - network_public
     environment:
       SERVER_PORT: 4000
-      GLOBAL_API_KEY: "sua-chave-api"
-      POSTGRES_AUTH_DB: "postgresql://user:pass@postgres:5432/evogo_auth"
-      POSTGRES_USERS_DB: "postgresql://user:pass@postgres:5432/evogo_users"
+      GLOBAL_API_KEY: "${GLOBAL_API_KEY:?set GLOBAL_API_KEY in .env}"
+      POSTGRES_AUTH_DB: "${POSTGRES_AUTH_DB:?set POSTGRES_AUTH_DB in .env}"
+      POSTGRES_USERS_DB: "${POSTGRES_USERS_DB:?set POSTGRES_USERS_DB in .env}"
 
     volumes:
       - evolution_go_data:/app/dbdata

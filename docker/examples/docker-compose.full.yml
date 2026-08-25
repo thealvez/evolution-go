@@ -13,11 +13,11 @@ services:
       CLIENT_NAME: "evolution"
 
       # Segurança
-      GLOBAL_API_KEY: "sua-chave-api-segura-aqui"
+      GLOBAL_API_KEY: "${GLOBAL_API_KEY:?set GLOBAL_API_KEY in .env}"
 
       # Banco de Dados PostgreSQL
-      POSTGRES_AUTH_DB: "postgresql://postgres:postgres@postgres:5432/evogo_auth?sslmode=disable"
-      POSTGRES_USERS_DB: "postgresql://postgres:postgres@postgres:5432/evogo_users?sslmode=disable"
+      POSTGRES_AUTH_DB: "${POSTGRES_AUTH_DB:?set POSTGRES_AUTH_DB in .env}"
+      POSTGRES_USERS_DB: "${POSTGRES_USERS_DB:?set POSTGRES_USERS_DB in .env}"
       DATABASE_SAVE_MESSAGES: "true"
 
       # Logs e Debug
@@ -40,7 +40,7 @@ services:
       WEBHOOK_URL: "https://seu-webhook.com/endpoint"
 
       # RabbitMQ
-      AMQP_URL: "amqp://admin:admin@rabbitmq:5672/default"
+      AMQP_URL: "${AMQP_URL:?set AMQP_URL in .env}"
       AMQP_GLOBAL_ENABLED: "true"
       AMQP_GLOBAL_EVENTS: "messages.upsert,messages.update,connection.update"
       AMQP_SPECIFIC_EVENTS: ""
@@ -53,8 +53,8 @@ services:
       # MinIO
       MINIO_ENABLED: "true"
       MINIO_ENDPOINT: "minio:9000"
-      MINIO_ACCESS_KEY: "minioadmin"
-      MINIO_SECRET_KEY: "minioadmin"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY in .env}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY in .env}"
       MINIO_BUCKET: "evolution-media"
       MINIO_USE_SSL: "false"
       MINIO_REGION: "us-east-1"
@@ -84,9 +84,9 @@ services:
     container_name: evolution-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+      POSTGRES_DB: "${POSTGRES_DB:-postgres}"
     ports:
       - "5432:5432"
     volumes:
@@ -100,9 +100,9 @@ services:
     container_name: evolution-rabbitmq
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: admin
-      RABBITMQ_DEFAULT_PASS: admin
-      RABBITMQ_DEFAULT_VHOST: default
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_DEFAULT_USER:?set RABBITMQ_DEFAULT_USER in .env}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_DEFAULT_PASS:?set RABBITMQ_DEFAULT_PASS in .env}"
+      RABBITMQ_DEFAULT_VHOST: "${RABBITMQ_DEFAULT_VHOST:-default}"
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -117,8 +117,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: "${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY in .env}"
+      MINIO_ROOT_PASSWORD: "${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY in .env}"
     ports:
       - "9000:9000"
       - "9001:9001"

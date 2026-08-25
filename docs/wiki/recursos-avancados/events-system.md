@@ -849,7 +849,7 @@ node webhook-server.js
 docker run -d --name rabbitmq   -p 5672:5672   -p 15672:15672   rabbitmq:3-management
 
 # .env
-AMQP_URL=amqp://guest:guest@localhost:5672/
+AMQP_URL=amqp://replace-with-rabbitmq-user:replace-with-rabbitmq-password@localhost:5672/
 AMQP_GLOBAL_ENABLED=true
 AMQP_SPECIFIC_EVENTS=message,sendmessage
 

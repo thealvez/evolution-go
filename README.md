@@ -100,13 +100,13 @@ WADEBUG=DEBUG
 LOGTYPE=console
 
 # Optional
-# AMQP_URL=amqp://guest:guest@localhost:5672/
+# AMQP_URL=amqp://replace-with-rabbitmq-user:replace-with-rabbitmq-password@localhost:5672/
 # NATS_URL=nats://localhost:4222
 # WEBHOOK_URL=https://your-webhook-url.com/webhook
 # MINIO_ENABLED=true
 # MINIO_ENDPOINT=localhost:9000
-# MINIO_ACCESS_KEY=minioadmin
-# MINIO_SECRET_KEY=minioadmin
+# MINIO_ACCESS_KEY=replace-with-minio-access-key
+# MINIO_SECRET_KEY=replace-with-minio-secret-key
 ```
 
 | Variable | Description | Default |

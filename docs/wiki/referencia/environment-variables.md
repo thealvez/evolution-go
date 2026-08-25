@@ -126,8 +126,8 @@ NATS_GLOBAL_EVENTS=messages.upsert,connection.update
 ```env
 MINIO_ENABLED=true
 MINIO_ENDPOINT=localhost:9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
+MINIO_ACCESS_KEY=replace-with-minio-access-key
+MINIO_SECRET_KEY=replace-with-minio-secret-key
 MINIO_BUCKET=evolution-media
 MINIO_USE_SSL=false
 MINIO_REGION=us-east-1
@@ -205,15 +205,15 @@ EVENT_IGNORE_STATUS=true
 WEBHOOK_URL=https://seu-servidor.com/webhook
 
 # RabbitMQ (opcional)
-AMQP_URL=amqp://admin:admin@rabbitmq:5672/default
+AMQP_URL=amqp://replace-with-rabbitmq-user:replace-with-rabbitmq-password@rabbitmq:5672/default
 AMQP_GLOBAL_ENABLED=true
 AMQP_GLOBAL_EVENTS=messages.upsert,connection.update
 
 # MinIO (opcional)
 MINIO_ENABLED=true
 MINIO_ENDPOINT=minio:9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
+MINIO_ACCESS_KEY=replace-with-minio-access-key
+MINIO_SECRET_KEY=replace-with-minio-secret-key
 MINIO_BUCKET=evolution-media
 MINIO_USE_SSL=false
 ```

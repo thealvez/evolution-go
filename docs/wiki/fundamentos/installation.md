@@ -294,13 +294,13 @@ docker-compose -f docker-compose-full.yml up -d
 
 - Evolution GO: http://localhost:4000
 - Swagger: http://localhost:4000/swagger/index.html
-- RabbitMQ: http://localhost:15672 (admin/admin)
-- MinIO: http://localhost:9001 (minioadmin/minioadmin)
+- RabbitMQ: http://localhost:15672 (`RABBITMQ_DEFAULT_USER` / `RABBITMQ_DEFAULT_PASS`)
+- MinIO: http://localhost:9001 (`MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY`)
 
 **Configuração MinIO (primeira vez):**
 
 1. Acesse http://localhost:9001
-2. Login: minioadmin / minioadmin
+2. Login: use `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` (definidos no `.env`)
 3. Create bucket: `evolution-media`
 4. Configurar política de acesso
 
@@ -408,7 +408,7 @@ volumes:
 ### MinIO Bucket Não Existe
 
 1. Acessar console: http://localhost:9001
-2. Login: minioadmin / minioadmin
+2. Login: use `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` (definidos no `.env`)
 3. Criar bucket: `evolution-media`
 
 Ou via CLI:

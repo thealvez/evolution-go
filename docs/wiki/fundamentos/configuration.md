@@ -303,7 +303,7 @@ URL de conexão RabbitMQ.
 - **Formato**: `amqp://user:pass@host:port/vhost`
 
 ```env
-AMQP_URL=amqp://admin:admin@rabbitmq:5672/default
+AMQP_URL=amqp://replace-with-rabbitmq-user:replace-with-rabbitmq-password@rabbitmq:5672/default
 ```
 
 ### AMQP_GLOBAL_ENABLED
@@ -390,7 +390,7 @@ MINIO_ENDPOINT=s3.amazonaws.com
 Access Key para autenticação.
 
 ```env
-MINIO_ACCESS_KEY=minioadmin
+MINIO_ACCESS_KEY=replace-with-minio-access-key
 ```
 
 ### MINIO_SECRET_KEY  
@@ -398,7 +398,7 @@ MINIO_ACCESS_KEY=minioadmin
 Secret Key para autenticação.
 
 ```env
-MINIO_SECRET_KEY=minioadmin
+MINIO_SECRET_KEY=replace-with-minio-secret-key
 ```
 
 ### MINIO_BUCKET

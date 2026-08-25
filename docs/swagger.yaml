@@ -9,6 +9,13 @@ definitions:
       callId:
         type: string
     type: object
+  github_com_EvolutionAPI_evolution-go_pkg_call_service.RingCallStruct:
+    properties:
+      durationSeconds:
+        type: integer
+      number:
+        type: string
+    type: object
   github_com_EvolutionAPI_evolution-go_pkg_chat_service.BodyStruct:
     properties:
       chat:
@@ -7194,6 +7201,36 @@ paths:
           schema:
             $ref: '#/definitions/gin.H'
       summary: Reject call
+      tags:
+      - Call
+  /call/ring:
+    post:
+      consumes:
+      - application/json
+      description: Place an experimental outbound voice call and hang up automatically
+      parameters:
+      - description: Call data
+        in: body
+        name: message
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_EvolutionAPI_evolution-go_pkg_call_service.RingCallStruct'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: success
+          schema:
+            $ref: '#/definitions/gin.H'
+        "400":
+          description: Invalid input
+          schema:
+            $ref: '#/definitions/gin.H'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/gin.H'
+      summary: Ring call
       tags:
       - Call
   /chat/archive:

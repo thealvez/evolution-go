@@ -47,6 +47,52 @@
                 }
             }
         },
+        "/call/ring": {
+            "post": {
+                "description": "Place an experimental outbound voice call and hang up automatically",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Call"
+                ],
+                "summary": "Ring call",
+                "parameters": [
+                    {
+                        "description": "Call data",
+                        "name": "message",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_EvolutionAPI_evolution-go_pkg_call_service.RingCallStruct"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "success",
+                        "schema": {
+                            "$ref": "#/definitions/gin.H"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input",
+                        "schema": {
+                            "$ref": "#/definitions/gin.H"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/gin.H"
+                        }
+                    }
+                }
+            }
+        },
         "/chat/archive": {
             "post": {
                 "description": "Archive a chat",
@@ -4007,6 +4053,17 @@
                     "$ref": "#/definitions/types.JID"
                 },
                 "callId": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_EvolutionAPI_evolution-go_pkg_call_service.RingCallStruct": {
+            "type": "object",
+            "properties": {
+                "durationSeconds": {
+                    "type": "integer"
+                },
+                "number": {
                     "type": "string"
                 }
             }

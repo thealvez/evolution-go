@@ -1,6 +1,7 @@
 package call_handler
 
 import (
+	"errors"
 	"net/http"
 
 	call_service "github.com/evolution-foundation/evolution-go/pkg/call/service"
@@ -10,6 +11,7 @@ import (
 
 type CallHandler interface {
 	RejectCall(ctx *gin.Context)
+	RingCall(ctx *gin.Context)
 }
 
 type callHandler struct {
@@ -44,6 +46,44 @@ func (g *callHandler) RejectCall(ctx *gin.Context) {
 
 	err = g.callService.RejectCall(data, instance)
 	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
+}
+
+// Ring call
+// @Summary Ring call
+// @Description Place an experimental outbound voice call and hang up automatically
+// @Tags Call
+// @Accept json
+// @Produce json
+// @Param message body call_service.RingCallStruct true "Call data"
+// @Success 200 {object} gin.H "success"
+// @Failure 400 {object} gin.H "Invalid input"
+// @Failure 500 {object} gin.H "Internal server error"
+// @Router /call/ring [post]
+func (g *callHandler) RingCall(ctx *gin.Context) {
+	getInstance := ctx.MustGet("instance")
+
+	instance, ok := getInstance.(*instance_model.Instance)
+	if !ok {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "instance not found"})
+		return
+	}
+
+	var data *call_service.RingCallStruct
+	if err := ctx.ShouldBindBodyWithJSON(&data); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := g.callService.RingCall(data, instance); err != nil {
+		if errors.Is(err, call_service.ErrInvalidRingDuration) || errors.Is(err, call_service.ErrInvalidRingTarget) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

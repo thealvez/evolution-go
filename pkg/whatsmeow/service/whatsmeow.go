@@ -23,6 +23,7 @@ import (
 
 	_ "github.com/lib/pq"
 	"github.com/patrickmn/go-cache"
+	"github.com/purpshell/meowcaller"
 	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
@@ -62,6 +63,7 @@ type WhatsmeowService interface {
 	UpdateInstanceSettings(instanceId string) error
 	UpdateInstanceAdvancedSettings(instanceId string) error
 	GetPollService() poll_service.PollService // NOVO: Acesso ao serviço de polls
+	GetCallClient(instanceId string) (*meowcaller.Client, bool)
 
 	// Passkey (WebAuthn) pairing bridge — read by the public ceremony endpoint,
 	// written by the whatsmeow event goroutine.
@@ -122,6 +124,7 @@ type whatsmeowService struct {
 	killChannel        map[string](chan bool)
 	userInfoCache      *cache.Cache
 	clientPointer      map[string]*whatsmeow.Client
+	callClients        *sync.Map
 	myClientPointer    map[string]*MyClient
 	rabbitmqProducer   producer_interfaces.Producer
 	webhookProducer    producer_interfaces.Producer
@@ -260,6 +263,9 @@ func (w whatsmeowService) reconnectClient(instanceId string) error {
 
 	// Remover das estruturas
 	delete(w.clientPointer, instanceId)
+	if w.callClients != nil {
+		w.callClients.Delete(instanceId)
+	}
 	delete(w.myClientPointer, instanceId)
 	delete(w.killChannel, instanceId)
 
@@ -489,6 +495,11 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 	}
 	clientLog := waLog.Stdout("Client", minLevel, true)
 	client := whatsmeow.NewClient(deviceStore, clientLog)
+	// meowcaller installs low-level call/ack interceptors and must wrap the
+	// whatsmeow client before Connect starts its receive loop.
+	if w.callClients != nil {
+		w.callClients.Store(cd.Instance.Id, meowcaller.NewClient(client))
+	}
 	// Sem isso, a sincronização inicial completa do app-state (pareamento
 	// novo, ou qualquer FetchAppState com fullSync=true) aplica as mutações
 	// no estado interno do whatsmeow mas nunca dispara LabelEdit/
@@ -664,6 +675,9 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 			client.Disconnect()
 
 			delete(w.clientPointer, cd.Instance.Id)
+			if w.callClients != nil {
+				w.callClients.Delete(cd.Instance.Id)
+			}
 			delete(w.myClientPointer, cd.Instance.Id)
 
 			// Limpar cache de userInfo para esta instância
@@ -2898,6 +2912,9 @@ func (w whatsmeowService) ClearInstanceCache(instanceId string, token string) er
 		delete(w.clientPointer, instanceId)
 		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Client pointer cleared", instanceId)
 	}
+	if w.callClients != nil {
+		w.callClients.Delete(instanceId)
+	}
 
 	// Limpar killChannel se existir
 	if killChan, exists := w.killChannel[instanceId]; exists {
@@ -2946,6 +2963,7 @@ func NewWhatsmeowService(
 		killChannel:        killChannel,
 		userInfoCache:      cache.New(5*time.Minute, 10*time.Minute),
 		clientPointer:      clientPointer,
+		callClients:        &sync.Map{},
 		myClientPointer:    make(map[string]*MyClient),
 		rabbitmqProducer:   rabbitmqProducer,
 		webhookProducer:    webhookProducer,
@@ -2960,6 +2978,22 @@ func NewWhatsmeowService(
 		sqlStore:           &sqlStoreState{},
 		reconnects:         &reconnectCoordinator{active: make(map[string]struct{})},
 	}
+}
+
+// GetCallClient returns the call wrapper bound to the current whatsmeow client
+// lifecycle for an instance.
+func (w whatsmeowService) GetCallClient(instanceId string) (*meowcaller.Client, bool) {
+	if w.callClients == nil {
+		return nil, false
+	}
+
+	value, ok := w.callClients.Load(instanceId)
+	if !ok {
+		return nil, false
+	}
+
+	client, ok := value.(*meowcaller.Client)
+	return client, ok && client != nil
 }
 
 // GetPollService retorna o serviço de polls (evita dupla inicialização)

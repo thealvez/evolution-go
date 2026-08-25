@@ -3,10 +3,13 @@ package call_service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"time"
 
 	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
 	logger_wrapper "github.com/evolution-foundation/evolution-go/pkg/logger"
+	"github.com/evolution-foundation/evolution-go/pkg/utils"
 	whatsmeow_service "github.com/evolution-foundation/evolution-go/pkg/whatsmeow/service"
 	"github.com/gomessguii/logger"
 	"go.mau.fi/whatsmeow"
@@ -15,7 +18,18 @@ import (
 
 type CallService interface {
 	RejectCall(data *RejectCallStruct, instance *instance_model.Instance) error
+	RingCall(data *RingCallStruct, instance *instance_model.Instance) error
 }
+
+const (
+	defaultRingDurationSeconds = 10
+	maxRingDurationSeconds     = 60
+)
+
+var (
+	ErrInvalidRingDuration = errors.New("durationSeconds must be at most 60")
+	ErrInvalidRingTarget   = errors.New("invalid call target")
+)
 
 type callService struct {
 	clientPointer    map[string]*whatsmeow.Client
@@ -26,6 +40,21 @@ type callService struct {
 type RejectCallStruct struct {
 	CallCreator types.JID `json:"callCreator"`
 	CallID      string    `json:"callId"`
+}
+
+type RingCallStruct struct {
+	Number          string `json:"number"`
+	DurationSeconds int    `json:"durationSeconds,omitempty"`
+}
+
+func normalizeRingDurationSeconds(seconds int) (time.Duration, error) {
+	if seconds <= 0 {
+		seconds = defaultRingDurationSeconds
+	}
+	if seconds > maxRingDurationSeconds {
+		return 0, ErrInvalidRingDuration
+	}
+	return time.Duration(seconds) * time.Second, nil
 }
 
 func (c *callService) ensureClientConnected(instanceId string) (*whatsmeow.Client, error) {
@@ -78,6 +107,75 @@ func (c *callService) RejectCall(data *RejectCallStruct, instance *instance_mode
 		logger.LogError("[%s] error reject call: %v", instance.Id, err)
 		return err
 	}
+
+	return nil
+}
+
+func (c *callService) RingCall(data *RingCallStruct, instance *instance_model.Instance) error {
+	if data == nil || instance == nil {
+		return ErrInvalidRingTarget
+	}
+
+	duration, err := normalizeRingDurationSeconds(data.DurationSeconds)
+	if err != nil {
+		return err
+	}
+
+	target, ok := utils.ParseJID(data.Number)
+	if !ok || (target.Server != types.DefaultUserServer && target.Server != types.HiddenUserServer) {
+		return ErrInvalidRingTarget
+	}
+	target = utils.CanonicalJID(target)
+
+	if _, err = c.ensureClientConnected(instance.Id); err != nil {
+		return err
+	}
+
+	callClient, ok := c.whatsmeowService.GetCallClient(instance.Id)
+	if !ok {
+		return fmt.Errorf("call client not available for instance %s", instance.Id)
+	}
+
+	// WARNING: outbound calls to unknown contacts may trigger WhatsApp's
+	// Reach-out Time-lock and can ban the connected number. Keep this endpoint
+	// isolated from campaigns, workers and other automated production flows.
+	call, err := callClient.Call(context.Background(), target.String())
+	if err != nil {
+		return fmt.Errorf("failed to send call offer: %w", err)
+	}
+
+	var hangupOnce sync.Once
+	var deadlineMu sync.Mutex
+	var deadlineTimer *time.Timer
+	callEnded := false
+	hangup := func(reason string) {
+		hangupOnce.Do(func() {
+			if err := call.Hangup(); err != nil {
+				c.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Failed to hang up outbound call (%s): %v", instance.Id, reason, err)
+				return
+			}
+			c.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Outbound call ended (%s)", instance.Id, reason)
+		})
+	}
+
+	call.OnEnd(func(_ string) {
+		deadlineMu.Lock()
+		callEnded = true
+		if deadlineTimer != nil {
+			deadlineTimer.Stop()
+		}
+		deadlineMu.Unlock()
+	})
+	call.OnReady(func() {
+		go hangup("peer answered")
+	})
+	deadlineMu.Lock()
+	if !callEnded {
+		deadlineTimer = time.AfterFunc(duration, func() {
+			hangup("ring deadline reached")
+		})
+	}
+	deadlineMu.Unlock()
 
 	return nil
 }

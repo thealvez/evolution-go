@@ -214,6 +214,7 @@ func (r *Routes) AssignRoutes(eng *gin.Engine) {
 			routes.POST("/message", r.labelHandler.MessageLabel)
 			routes.POST("/edit", r.labelHandler.EditLabel)
 			routes.GET("/list", r.labelHandler.GetLabels)
+			routes.POST("/resync", r.labelHandler.ResyncAppState)
 		}
 	}
 	routes = eng.Group("/unlabel")

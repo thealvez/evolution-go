@@ -15,6 +15,7 @@ type LabelHandler interface {
 	ChatUnlabel(ctx *gin.Context)
 	MessageUnlabel(ctx *gin.Context)
 	GetLabels(ctx *gin.Context)
+	ResyncAppState(ctx *gin.Context)
 }
 
 type labelHandler struct {
@@ -286,6 +287,32 @@ func (l *labelHandler) GetLabels(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, labels)
+}
+
+// Resync app state
+// @Summary Force a full app-state resync
+// @Description Reseta a version salva de todas as coleções de app-state e busca tudo de novo do servidor, incluindo etiquetas e associações já existentes antes do pareamento atual.
+// @Tags Label
+// @Accept json
+// @Produce json
+// @Success 200 {object} gin.H "success"
+// @Failure 500 {object} gin.H "Internal server error"
+// @Router /label/resync [post]
+func (l *labelHandler) ResyncAppState(ctx *gin.Context) {
+	getInstance := ctx.MustGet("instance")
+
+	instance, ok := getInstance.(*instance_model.Instance)
+	if !ok {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "instance not found"})
+		return
+	}
+
+	if err := l.labelService.ResyncAppState(instance); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
 }
 
 func NewLabelHandler(

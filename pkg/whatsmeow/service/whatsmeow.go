@@ -489,6 +489,13 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 	}
 	clientLog := waLog.Stdout("Client", minLevel, true)
 	client := whatsmeow.NewClient(deviceStore, clientLog)
+	// Sem isso, a sincronização inicial completa do app-state (pareamento
+	// novo, ou qualquer FetchAppState com fullSync=true) aplica as mutações
+	// no estado interno do whatsmeow mas nunca dispara LabelEdit/
+	// LabelAssociationChat/etc como evento Go — histórico pré-existente
+	// (etiquetas já aplicadas a contatos, por exemplo) fica invisível pra
+	// sempre, só mutações incrementais pós-sync viram evento.
+	client.EmitAppStateEventsOnFullSync = true
 
 	w.clientPointer[cd.Instance.Id] = client
 

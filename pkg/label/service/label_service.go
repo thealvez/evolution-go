@@ -22,6 +22,7 @@ type LabelService interface {
 	ChatUnlabel(data *ChatLabelStruct, instance *instance_model.Instance) error
 	MessageUnlabel(data *MessageLabelStruct, instance *instance_model.Instance) error
 	GetLabels(instance *instance_model.Instance) ([]label_model.Label, error)
+	ResyncAppState(instance *instance_model.Instance) error
 }
 
 type labelService struct {
@@ -223,6 +224,30 @@ func (l *labelService) GetLabels(instance *instance_model.Instance) ([]label_mod
 	}
 
 	return labels, nil
+}
+
+// ResyncAppState força uma re-sincronização completa do app-state (todas as
+// coleções: critical_block, critical_unblock_low, regular, regular_high,
+// regular_low) contra o servidor da Meta. Necessário pra instâncias já
+// pareadas antes do client passar a setar EmitAppStateEventsOnFullSync=true:
+// elas têm version>0 salvo localmente, então nunca refariam sozinhas o full
+// sync que emitiria os eventos (LabelEdit/LabelAssociationChat/etc) do
+// histórico já existente — FetchAppState com fullSync=true reseta a version
+// e força a busca completa de novo.
+func (l *labelService) ResyncAppState(instance *instance_model.Instance) error {
+	client, err := l.ensureClientConnected(instance.Id)
+	if err != nil {
+		return err
+	}
+
+	for _, name := range appstate.AllPatchNames {
+		if err := client.FetchAppState(context.Background(), name, true, false); err != nil {
+			l.loggerWrapper.GetLogger(instance.Id).LogError("[%s] error resyncing app state %s: %v", instance.Id, name, err)
+			return err
+		}
+	}
+
+	return nil
 }
 
 func NewLabelService(

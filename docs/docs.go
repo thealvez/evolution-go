@@ -57,7 +57,7 @@ const docTemplate = `{
         },
         "/call/ring": {
             "post": {
-                "description": "Place an experimental outbound voice call and hang up automatically",
+                "description": "Place an experimental outbound voice call, optionally play a recorded audio after answer, and hang up automatically",
                 "consumes": [
                     "application/json"
                 ],
@@ -4068,6 +4068,9 @@ const docTemplate = `{
         "github_com_EvolutionAPI_evolution-go_pkg_call_service.RingCallStruct": {
             "type": "object",
             "properties": {
+                "audioUrl": {
+                    "type": "string"
+                },
                 "durationSeconds": {
                     "type": "integer"
                 },

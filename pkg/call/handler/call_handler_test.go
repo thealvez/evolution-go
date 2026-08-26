@@ -37,7 +37,7 @@ func TestRingCallHTTPContract(t *testing.T) {
 	}{
 		{
 			name:       "success",
-			body:       `{"number":"5511999999999@s.whatsapp.net","durationSeconds":10}`,
+			body:       `{"number":"5511999999999@s.whatsapp.net","durationSeconds":10,"audioUrl":"https://cdn.example.com/greeting.mp3"}`,
 			wantStatus: http.StatusOK,
 		},
 		{
@@ -50,6 +50,18 @@ func TestRingCallHTTPContract(t *testing.T) {
 			name:       "invalid target",
 			body:       `{"number":""}`,
 			serviceErr: call_service.ErrInvalidRingTarget,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "invalid audio URL",
+			body:       `{"number":"5511999999999@s.whatsapp.net","audioUrl":"file:///tmp/greeting.mp3"}`,
+			serviceErr: call_service.ErrInvalidRingAudioURL,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "unsupported audio format",
+			body:       `{"number":"5511999999999@s.whatsapp.net","audioUrl":"https://cdn.example.com/greeting.aac"}`,
+			serviceErr: call_service.ErrUnsupportedRingAudio,
 			wantStatus: http.StatusBadRequest,
 		},
 		{
@@ -83,6 +95,9 @@ func TestRingCallHTTPContract(t *testing.T) {
 			if tt.wantStatus == http.StatusOK {
 				if fake.ringData == nil || fake.ringData.DurationSeconds != 10 {
 					t.Fatalf("RingCall() data = %#v, want durationSeconds=10", fake.ringData)
+				}
+				if fake.ringData.AudioURL != "https://cdn.example.com/greeting.mp3" {
+					t.Fatalf("RingCall() audioUrl = %q, want request audioUrl", fake.ringData.AudioURL)
 				}
 				if response.Body.String() != `{"message":"success"}` {
 					t.Fatalf("RingCall() body = %s, want success response", response.Body.String())

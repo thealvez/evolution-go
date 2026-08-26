@@ -55,7 +55,7 @@ func (g *callHandler) RejectCall(ctx *gin.Context) {
 
 // Ring call
 // @Summary Ring call
-// @Description Place an experimental outbound voice call and hang up automatically
+// @Description Place an experimental outbound voice call, optionally play a recorded audio after answer, and hang up automatically
 // @Tags Call
 // @Accept json
 // @Produce json
@@ -80,7 +80,10 @@ func (g *callHandler) RingCall(ctx *gin.Context) {
 	}
 
 	if err := g.callService.RingCall(data, instance); err != nil {
-		if errors.Is(err, call_service.ErrInvalidRingDuration) || errors.Is(err, call_service.ErrInvalidRingTarget) {
+		if errors.Is(err, call_service.ErrInvalidRingDuration) ||
+			errors.Is(err, call_service.ErrInvalidRingTarget) ||
+			errors.Is(err, call_service.ErrInvalidRingAudioURL) ||
+			errors.Is(err, call_service.ErrUnsupportedRingAudio) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

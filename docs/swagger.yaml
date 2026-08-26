@@ -11,6 +11,8 @@ definitions:
     type: object
   github_com_EvolutionAPI_evolution-go_pkg_call_service.RingCallStruct:
     properties:
+      audioUrl:
+        type: string
       durationSeconds:
         type: integer
       number:
@@ -7207,7 +7209,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Place an experimental outbound voice call and hang up automatically
+      description: Place an experimental outbound voice call, optionally play a recorded
+        audio after answer, and hang up automatically
       parameters:
       - description: Call data
         in: body

@@ -5,6 +5,7 @@ Documentação do endpoint para gerenciar chamadas WhatsApp.
 ## 📋 Índice
 
 - [Rejeitar Chamada](#rejeitar-chamada)
+- [Iniciar Chamada de Voz](#iniciar-chamada-de-voz)
 
 ---
 
@@ -68,6 +69,66 @@ curl -X POST http://localhost:4000/call/reject \
     "callId": "ABC123XYZ"
   }'
 ```
+
+---
+
+## Iniciar Chamada de Voz
+
+Inicia uma chamada de voz experimental para um contato individual. Quando `audioUrl` é informado, o áudio é reproduzido depois que a chamada é atendida e a chamada é encerrada ao final da reprodução.
+
+**Endpoint**: `POST /call/ring`
+
+**Headers**:
+```text
+Content-Type: application/json
+apikey: SUA-CHAVE-API
+```
+
+**Body**:
+```json
+{
+  "number": "5511999999999@s.whatsapp.net",
+  "durationSeconds": 15,
+  "audioUrl": "https://cdn.exemplo.com/audios/saudacao.mp3"
+}
+```
+
+**Parâmetros**:
+
+| Campo | Tipo | Obrigatório | Descrição |
+|-------|------|-------------|-----------|
+| `number` | string (JID) | ✅ Sim | JID individual `@s.whatsapp.net` ou `@lid` |
+| `durationSeconds` | inteiro | Não | Prazo para a chamada ser atendida, de 1 a 60 segundos; padrão: 10 |
+| `audioUrl` | string (URL) | Não | URL HTTP(S) do áudio; formatos: MP3, WAV, OGG ou Opus |
+
+O arquivo de áudio pode ter no máximo 20 MiB. A URL precisa terminar com uma extensão suportada, mesmo quando contém query string. O host e todos os redirecionamentos devem resolver exclusivamente para endereços IP públicos; loopback, redes privadas, link-local e endpoints de metadata são bloqueados.
+
+**Comportamento**:
+
+1. Se ninguém atender dentro de `durationSeconds`, a chamada é encerrada.
+2. Sem `audioUrl`, a chamada é encerrada assim que o contato atende.
+3. Com `audioUrl`, o prazo de toque é cancelado quando o contato atende, o áudio é reproduzido e a chamada é encerrada ao final.
+
+**Resposta de Sucesso (200)**:
+```json
+{
+  "message": "success"
+}
+```
+
+**Exemplo cURL**:
+```bash
+curl -X POST http://localhost:4000/call/ring \
+  -H "Content-Type: application/json" \
+  -H "apikey: SUA-CHAVE-API" \
+  -d '{
+    "number": "5511999999999@s.whatsapp.net",
+    "durationSeconds": 15,
+    "audioUrl": "https://cdn.exemplo.com/audios/saudacao.mp3"
+  }'
+```
+
+> **Atenção**: chamadas para contatos desconhecidos podem acionar proteções antiabuso do WhatsApp e colocar a conta em risco. Não use este endpoint em campanhas ou disparos automatizados.
 
 ---
 
@@ -139,7 +200,7 @@ Aceitar apenas chamadas de áudio:
 
 ### Limitações do WhatsApp
 
-1. **Não é possível aceitar chamadas via API**: A API do WhatsApp Multi-Device não permite aceitar chamadas programaticamente. Você só pode rejeitá-las.
+1. **Não é possível aceitar chamadas recebidas via API**: o endpoint experimental inicia chamadas de saída, mas não atende chamadas recebidas.
 
 2. **Chamadas em grupos**: Chamadas em grupos também disparam o evento, mas o campo `isGroup` será `true`.
 

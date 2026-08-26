@@ -60,8 +60,9 @@ func (g *callHandler) RejectCall(ctx *gin.Context) {
 // @Accept json
 // @Produce json
 // @Param message body call_service.RingCallStruct true "Call data"
-// @Success 200 {object} gin.H "success"
+// @Success 200 {object} gin.H "queued"
 // @Failure 400 {object} gin.H "Invalid input"
+// @Failure 429 {object} gin.H "Call queue full for this instance"
 // @Failure 500 {object} gin.H "Internal server error"
 // @Router /call/ring [post]
 func (g *callHandler) RingCall(ctx *gin.Context) {
@@ -80,6 +81,10 @@ func (g *callHandler) RingCall(ctx *gin.Context) {
 	}
 
 	if err := g.callService.RingCall(data, instance); err != nil {
+		if errors.Is(err, call_service.ErrRingCallQueueFull) {
+			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, call_service.ErrInvalidRingDuration) ||
 			errors.Is(err, call_service.ErrInvalidRingTarget) ||
 			errors.Is(err, call_service.ErrInvalidRingAudioURL) ||
@@ -91,7 +96,7 @@ func (g *callHandler) RingCall(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
+	ctx.JSON(http.StatusOK, gin.H{"message": "queued"})
 }
 
 func NewCallHandler(

@@ -33,6 +33,7 @@ type CallService interface {
 const (
 	defaultRingDurationSeconds = 10
 	maxRingDurationSeconds     = 60
+	maxQueuedRingCalls         = 10
 )
 
 var (
@@ -40,6 +41,7 @@ var (
 	ErrInvalidRingTarget    = errors.New("invalid call target")
 	ErrInvalidRingAudioURL  = errors.New("audioUrl must be a public http(s) URL")
 	ErrUnsupportedRingAudio = errors.New("audioUrl format not supported")
+	ErrRingCallQueueFull    = errors.New("call queue is full for this instance")
 	nonPublicAudioPrefixes  = []netip.Prefix{
 		netip.MustParsePrefix("0.0.0.0/8"),
 		netip.MustParsePrefix("100.64.0.0/10"),
@@ -60,6 +62,21 @@ type callService struct {
 	ensureClientConnectedFn func(instanceId string) (*whatsmeow.Client, error)
 	openRingAudioSourceFn   func(string) (meowcaller.AudioSource, func(), error)
 	placeRingCallFn         func(context.Context, string, string) (ringCallSession, error)
+	ringQueuesMu            sync.Mutex
+	ringQueues              map[string]*ringCallQueue
+}
+
+type ringCallJob struct {
+	instanceID string
+	target     string
+	duration   time.Duration
+	audioURL   string
+}
+
+type ringCallQueue struct {
+	mu      sync.Mutex
+	active  bool
+	pending []ringCallJob
 }
 
 type ringCallPlayer interface {
@@ -400,30 +417,97 @@ func (c *callService) RejectCall(data *RejectCallStruct, instance *instance_mode
 	return nil
 }
 
-func (c *callService) RingCall(data *RingCallStruct, instance *instance_model.Instance) error {
+func normalizeRingCallJob(data *RingCallStruct, instance *instance_model.Instance) (ringCallJob, error) {
 	if data == nil || instance == nil {
-		return ErrInvalidRingTarget
+		return ringCallJob{}, ErrInvalidRingTarget
 	}
 
 	duration, err := normalizeRingDurationSeconds(data.DurationSeconds)
 	if err != nil {
-		return err
+		return ringCallJob{}, err
 	}
 
 	target, ok := utils.ParseJID(data.Number)
 	if !ok || (target.Server != types.DefaultUserServer && target.Server != types.HiddenUserServer) {
-		return ErrInvalidRingTarget
+		return ringCallJob{}, ErrInvalidRingTarget
 	}
 	target = utils.CanonicalJID(target)
+	audioURL, err := normalizeRingAudioURL(data.AudioURL)
+	if err != nil {
+		return ringCallJob{}, err
+	}
+
+	return ringCallJob{
+		instanceID: instance.Id,
+		target:     target.String(),
+		duration:   duration,
+		audioURL:   audioURL,
+	}, nil
+}
+
+func (c *callService) enqueueRingCall(job ringCallJob) error {
+	c.ringQueuesMu.Lock()
+	if c.ringQueues == nil {
+		c.ringQueues = make(map[string]*ringCallQueue)
+	}
+	queue := c.ringQueues[job.instanceID]
+	if queue == nil {
+		queue = &ringCallQueue{}
+		c.ringQueues[job.instanceID] = queue
+	}
+	c.ringQueuesMu.Unlock()
+
+	queue.mu.Lock()
+	if queue.active {
+		if len(queue.pending) >= maxQueuedRingCalls {
+			queue.mu.Unlock()
+			return ErrRingCallQueueFull
+		}
+		queue.pending = append(queue.pending, job)
+		queue.mu.Unlock()
+		return nil
+	}
+	queue.active = true
+	queue.mu.Unlock()
+
+	go c.runRingCallQueue(queue, job)
+	return nil
+}
+
+func (c *callService) runRingCallQueue(queue *ringCallQueue, job ringCallJob) {
+	for {
+		if err := c.executeRingCall(job); err != nil && c.loggerWrapper != nil {
+			c.loggerWrapper.GetLogger(job.instanceID).LogError(
+				"[%s] Queued outbound call failed: %v",
+				job.instanceID,
+				err,
+			)
+		}
+
+		queue.mu.Lock()
+		if len(queue.pending) == 0 {
+			queue.active = false
+			queue.mu.Unlock()
+			return
+		}
+		job = queue.pending[0]
+		queue.pending[0] = ringCallJob{}
+		queue.pending = queue.pending[1:]
+		queue.mu.Unlock()
+	}
+}
+
+func (c *callService) executeRingCall(job ringCallJob) error {
 
 	var audioSource meowcaller.AudioSource
 	var audioCleanup func()
-	if strings.TrimSpace(data.AudioURL) != "" {
+	if job.audioURL != "" {
 		openAudioSource := openRingAudioSource
 		if c.openRingAudioSourceFn != nil {
 			openAudioSource = c.openRingAudioSourceFn
 		}
-		audioSource, audioCleanup, err = openAudioSource(data.AudioURL)
+		var err error
+		audioSource, audioCleanup, err = openAudioSource(job.audioURL)
 		if err != nil {
 			return err
 		}
@@ -437,7 +521,7 @@ func (c *callService) RingCall(data *RingCallStruct, instance *instance_model.In
 		}
 	}
 
-	if _, err = c.ensureClientConnected(instance.Id); err != nil {
+	if _, err := c.ensureClientConnected(job.instanceID); err != nil {
 		cleanupAudio()
 		return err
 	}
@@ -445,7 +529,7 @@ func (c *callService) RingCall(data *RingCallStruct, instance *instance_model.In
 	// WARNING: outbound calls to unknown contacts may trigger WhatsApp's
 	// Reach-out Time-lock and can ban the connected number. Keep this endpoint
 	// isolated from campaigns, workers and other automated production flows.
-	call, err := c.placeRingCall(context.Background(), instance.Id, target.String())
+	call, err := c.placeRingCall(context.Background(), job.instanceID, job.target)
 	if err != nil {
 		cleanupAudio()
 		return err
@@ -459,6 +543,13 @@ func (c *callService) RingCall(data *RingCallStruct, instance *instance_model.In
 	var playerMu sync.Mutex
 	var activePlayer ringCallPlayer
 	callStopped := false
+	var completeOnce sync.Once
+	done := make(chan struct{})
+	complete := func() {
+		completeOnce.Do(func() {
+			close(done)
+		})
+	}
 	stopDeadline := func() {
 		deadlineMu.Lock()
 		deadlineStopped = true
@@ -483,10 +574,16 @@ func (c *callService) RingCall(data *RingCallStruct, instance *instance_model.In
 			stopPlayer()
 			cleanupOnce.Do(cleanupAudio)
 			if err := call.Hangup(); err != nil {
-				c.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Failed to hang up outbound call (%s): %v", instance.Id, reason, err)
+				if c.loggerWrapper != nil {
+					c.loggerWrapper.GetLogger(job.instanceID).LogError("[%s] Failed to hang up outbound call (%s): %v", job.instanceID, reason, err)
+				}
+				complete()
 				return
 			}
-			c.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Outbound call ended (%s)", instance.Id, reason)
+			if c.loggerWrapper != nil {
+				c.loggerWrapper.GetLogger(job.instanceID).LogInfo("[%s] Outbound call ended (%s)", job.instanceID, reason)
+			}
+			complete()
 		})
 	}
 
@@ -494,6 +591,7 @@ func (c *callService) RingCall(data *RingCallStruct, instance *instance_model.In
 		stopDeadline()
 		stopPlayer()
 		cleanupOnce.Do(cleanupAudio)
+		complete()
 	})
 	call.OnReady(func() {
 		if audioSource != nil {
@@ -519,13 +617,22 @@ func (c *callService) RingCall(data *RingCallStruct, instance *instance_model.In
 	})
 	deadlineMu.Lock()
 	if !deadlineStopped {
-		deadlineTimer = time.AfterFunc(duration, func() {
+		deadlineTimer = time.AfterFunc(job.duration, func() {
 			hangup("ring deadline reached")
 		})
 	}
 	deadlineMu.Unlock()
 
+	<-done
 	return nil
+}
+
+func (c *callService) RingCall(data *RingCallStruct, instance *instance_model.Instance) error {
+	job, err := normalizeRingCallJob(data, instance)
+	if err != nil {
+		return err
+	}
+	return c.enqueueRingCall(job)
 }
 
 func NewCallService(

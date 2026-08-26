@@ -7210,7 +7210,8 @@ paths:
       consumes:
       - application/json
       description: Place an experimental outbound voice call, optionally play a recorded
-        audio after answer, and hang up automatically
+        audio after answer, and hang up automatically. Accepted requests are queued
+        per instance and return immediately.
       parameters:
       - description: Call data
         in: body
@@ -7222,11 +7223,15 @@ paths:
       - application/json
       responses:
         "200":
-          description: success
+          description: queued
           schema:
             $ref: '#/definitions/gin.H'
         "400":
           description: Invalid input
+          schema:
+            $ref: '#/definitions/gin.H'
+        "429":
+          description: Call queue full for this instance
           schema:
             $ref: '#/definitions/gin.H'
         "500":

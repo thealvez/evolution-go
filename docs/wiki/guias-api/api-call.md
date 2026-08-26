@@ -75,6 +75,7 @@ curl -X POST http://localhost:4000/call/reject \
 ## Iniciar Chamada de Voz
 
 Inicia uma chamada de voz experimental para um contato individual. Quando `audioUrl` é informado, o áudio é reproduzido depois que a chamada é atendida e a chamada é encerrada ao final da reprodução.
+As requisições válidas são aceitas imediatamente e entram em fila FIFO por instância. O endpoint retorna `429` quando a fila da instância estiver cheia.
 
 **Endpoint**: `POST /call/ring`
 
@@ -112,7 +113,14 @@ O arquivo de áudio pode ter no máximo 20 MiB. A URL precisa terminar com uma e
 **Resposta de Sucesso (200)**:
 ```json
 {
-  "message": "success"
+  "message": "queued"
+}
+```
+
+**Resposta de Erro (429)**:
+```json
+{
+  "error": "call queue is full for this instance"
 }
 ```
 

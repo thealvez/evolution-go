@@ -71,6 +71,12 @@ func TestRingCallHTTPContract(t *testing.T) {
 			wantStatus: http.StatusInternalServerError,
 		},
 		{
+			name:       "queue full",
+			body:       `{"number":"5511999999999@s.whatsapp.net"}`,
+			serviceErr: call_service.ErrRingCallQueueFull,
+			wantStatus: http.StatusTooManyRequests,
+		},
+		{
 			name:       "malformed JSON",
 			body:       `{"number":`,
 			wantStatus: http.StatusBadRequest,
@@ -99,8 +105,8 @@ func TestRingCallHTTPContract(t *testing.T) {
 				if fake.ringData.AudioURL != "https://cdn.example.com/greeting.mp3" {
 					t.Fatalf("RingCall() audioUrl = %q, want request audioUrl", fake.ringData.AudioURL)
 				}
-				if response.Body.String() != `{"message":"success"}` {
-					t.Fatalf("RingCall() body = %s, want success response", response.Body.String())
+				if response.Body.String() != `{"message":"queued"}` {
+					t.Fatalf("RingCall() body = %s, want queued response", response.Body.String())
 				}
 			}
 		})

@@ -145,6 +145,27 @@ func (s *fakeCallSession) hangupCount() int {
 	return s.hangups
 }
 
+func waitForPlayer(t *testing.T, session *fakeCallSession) *fakeCallPlayer {
+	t.Helper()
+
+	deadline := time.After(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if player := session.currentPlayer(); player != nil {
+			return player
+		}
+
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for audio playback to start")
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
 func TestNormalizeRingDurationSeconds(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -315,12 +336,9 @@ func TestRingCallPlaysAudioAndHangsUpAfterPlayback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RingCall() error = %v", err)
 	}
+	player := waitForPlayer(t, session)
 	if placedTarget != "5511999999999@s.whatsapp.net" {
 		t.Fatalf("Call() target = %q, want canonical target", placedTarget)
-	}
-	player := session.currentPlayer()
-	if player == nil {
-		t.Fatal("RingCall() did not start audio playback after ready")
 	}
 
 	// OnReady fired while its callback was being registered. The ring deadline
@@ -345,6 +363,237 @@ func TestRingCallPlaysAudioAndHangsUpAfterPlayback(t *testing.T) {
 	}
 	if !audioSource.isClosed() {
 		t.Fatal("audio source was not closed")
+	}
+}
+
+func TestRingCallQueuesJobsPerInstanceInFIFO(t *testing.T) {
+	instance := &instance_model.Instance{Id: "test-instance"}
+	targets := []string{
+		"5511999999991@s.whatsapp.net",
+		"5511999999992@s.whatsapp.net",
+		"5511999999993@s.whatsapp.net",
+		"5511999999994@s.whatsapp.net",
+		"5511999999995@s.whatsapp.net",
+	}
+	sessions := map[string]*fakeCallSession{}
+	for _, target := range targets {
+		sessions[target] = newFakeCallSession(true)
+	}
+	placed := make(chan string, len(targets))
+	service := &callService{
+		loggerWrapper: logger_wrapper.NewLoggerManager(&config.Config{
+			LogDirectory: t.TempDir(),
+		}),
+		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
+			return nil, nil
+		},
+		openRingAudioSourceFn: func(string) (meowcaller.AudioSource, func(), error) {
+			return &fakeRingAudioSource{}, func() {}, nil
+		},
+		placeRingCallFn: func(_ context.Context, _, target string) (ringCallSession, error) {
+			placed <- target
+			return sessions[target], nil
+		},
+	}
+
+	for i, target := range targets {
+		data := &RingCallStruct{Number: target}
+		if i == 0 {
+			data.AudioURL = "https://cdn.example.com/first.wav"
+		}
+		if err := service.RingCall(data, instance); err != nil {
+			t.Fatalf("RingCall() enqueue %d error = %v", i, err)
+		}
+	}
+
+	if got := <-placed; got != targets[0] {
+		t.Fatalf("first placement = %q, want %q", got, targets[0])
+	}
+	player := waitForPlayer(t, sessions[targets[0]])
+
+	select {
+	case got := <-placed:
+		t.Fatalf("second placement started too early: %q", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	player.finish()
+
+	for _, want := range targets[1:] {
+		select {
+		case got := <-placed:
+			if got != want {
+				t.Fatalf("placement order = %q, want %q", got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for queued placement %q", want)
+		}
+	}
+}
+
+func TestRingCallQueuesDifferentInstancesIndependently(t *testing.T) {
+	instanceA := &instance_model.Instance{Id: "instance-a"}
+	instanceB := &instance_model.Instance{Id: "instance-b"}
+	sessionA := newFakeCallSession(true)
+	sessionB := newFakeCallSession(true)
+	placed := make(chan struct {
+		instanceID string
+		target     string
+	}, 2)
+	service := &callService{
+		loggerWrapper: logger_wrapper.NewLoggerManager(&config.Config{
+			LogDirectory: t.TempDir(),
+		}),
+		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
+			return nil, nil
+		},
+		openRingAudioSourceFn: func(string) (meowcaller.AudioSource, func(), error) {
+			return &fakeRingAudioSource{}, func() {}, nil
+		},
+		placeRingCallFn: func(_ context.Context, instanceID, target string) (ringCallSession, error) {
+			placed <- struct {
+				instanceID string
+				target     string
+			}{instanceID: instanceID, target: target}
+			if instanceID == instanceA.Id {
+				return sessionA, nil
+			}
+			return sessionB, nil
+		},
+	}
+
+	if err := service.RingCall(&RingCallStruct{Number: "5511999999996@s.whatsapp.net", AudioURL: "https://cdn.example.com/a.wav"}, instanceA); err != nil {
+		t.Fatalf("RingCall() instance A error = %v", err)
+	}
+	if err := service.RingCall(&RingCallStruct{Number: "5511999999997@s.whatsapp.net", AudioURL: "https://cdn.example.com/b.wav"}, instanceB); err != nil {
+		t.Fatalf("RingCall() instance B error = %v", err)
+	}
+
+	seen := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		select {
+		case got := <-placed:
+			seen[got.instanceID] = true
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for independent placements")
+		}
+	}
+	if !seen[instanceA.Id] || !seen[instanceB.Id] {
+		t.Fatalf("placements seen = %#v, want both instances", seen)
+	}
+
+	waitForPlayer(t, sessionA).finish()
+	waitForPlayer(t, sessionB).finish()
+}
+
+func TestRingCallContinuesQueueAfterFailure(t *testing.T) {
+	instance := &instance_model.Instance{Id: "test-instance"}
+	firstTarget := "5511999999998@s.whatsapp.net"
+	secondTarget := "5511999999999@s.whatsapp.net"
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	placed := make(chan string, 1)
+	service := &callService{
+		loggerWrapper: logger_wrapper.NewLoggerManager(&config.Config{
+			LogDirectory: t.TempDir(),
+		}),
+		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
+			return nil, nil
+		},
+		placeRingCallFn: func(_ context.Context, _, target string) (ringCallSession, error) {
+			if target == firstTarget {
+				close(firstStarted)
+				<-releaseFirst
+				return nil, errors.New("offer failed")
+			}
+			placed <- target
+			return newFakeCallSession(true), nil
+		},
+	}
+
+	if err := service.RingCall(&RingCallStruct{Number: firstTarget}, instance); err != nil {
+		t.Fatalf("RingCall() first enqueue error = %v", err)
+	}
+	<-firstStarted
+
+	if err := service.RingCall(&RingCallStruct{Number: secondTarget}, instance); err != nil {
+		t.Fatalf("RingCall() second enqueue error = %v", err)
+	}
+
+	close(releaseFirst)
+
+	select {
+	case got := <-placed:
+		if got != secondTarget {
+			t.Fatalf("queued placement = %q, want %q", got, secondTarget)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queue to continue after failure")
+	}
+}
+
+func TestRingCallRejectsWhenQueueIsFull(t *testing.T) {
+	instance := &instance_model.Instance{Id: "test-instance"}
+	targets := []string{
+		"5511999999980@s.whatsapp.net",
+		"5511999999981@s.whatsapp.net",
+		"5511999999982@s.whatsapp.net",
+		"5511999999983@s.whatsapp.net",
+		"5511999999984@s.whatsapp.net",
+		"5511999999985@s.whatsapp.net",
+		"5511999999990@s.whatsapp.net",
+		"5511999999991@s.whatsapp.net",
+		"5511999999992@s.whatsapp.net",
+		"5511999999993@s.whatsapp.net",
+		"5511999999994@s.whatsapp.net",
+	}
+	sessions := map[string]*fakeCallSession{}
+	for _, target := range targets {
+		sessions[target] = newFakeCallSession(true)
+	}
+	placed := make(chan string, len(targets))
+	service := &callService{
+		loggerWrapper: logger_wrapper.NewLoggerManager(&config.Config{
+			LogDirectory: t.TempDir(),
+		}),
+		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
+			return nil, nil
+		},
+		openRingAudioSourceFn: func(string) (meowcaller.AudioSource, func(), error) {
+			return &fakeRingAudioSource{}, func() {}, nil
+		},
+		placeRingCallFn: func(_ context.Context, _, target string) (ringCallSession, error) {
+			placed <- target
+			return sessions[target], nil
+		},
+	}
+
+	if err := service.RingCall(&RingCallStruct{
+		Number:   targets[0],
+		AudioURL: "https://cdn.example.com/hold.wav",
+	}, instance); err != nil {
+		t.Fatalf("RingCall() active enqueue error = %v", err)
+	}
+	waitForPlayer(t, sessions[targets[0]])
+
+	for i, target := range targets[1:11] {
+		if err := service.RingCall(&RingCallStruct{Number: target}, instance); err != nil {
+			t.Fatalf("RingCall() pending enqueue %d error = %v", i, err)
+		}
+	}
+
+	if err := service.RingCall(&RingCallStruct{Number: "5511999999995@s.whatsapp.net"}, instance); !errors.Is(err, ErrRingCallQueueFull) {
+		t.Fatalf("RingCall() overflow error = %v, want %v", err, ErrRingCallQueueFull)
+	}
+
+	waitForPlayer(t, sessions[targets[0]]).finish()
+
+	for i := 0; i < 10; i++ {
+		select {
+		case <-placed:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for queued call %d to start", i+1)
+		}
 	}
 }
 

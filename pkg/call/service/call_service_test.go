@@ -575,6 +575,14 @@ func TestRingCallRejectsWhenQueueIsFull(t *testing.T) {
 		t.Fatalf("RingCall() active enqueue error = %v", err)
 	}
 	waitForPlayer(t, sessions[targets[0]])
+	select {
+	case got := <-placed:
+		if got != targets[0] {
+			t.Fatalf("active placement = %q, want %q", got, targets[0])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for active call to start")
+	}
 
 	for i, target := range targets[1:11] {
 		if err := service.RingCall(&RingCallStruct{Number: target}, instance); err != nil {
@@ -588,11 +596,14 @@ func TestRingCallRejectsWhenQueueIsFull(t *testing.T) {
 
 	waitForPlayer(t, sessions[targets[0]]).finish()
 
-	for i := 0; i < 10; i++ {
+	for _, want := range targets[1:] {
 		select {
-		case <-placed:
+		case got := <-placed:
+			if got != want {
+				t.Fatalf("queued placement = %q, want %q", got, want)
+			}
 		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for queued call %d to start", i+1)
+			t.Fatalf("timed out waiting for queued call %q to start", want)
 		}
 	}
 }

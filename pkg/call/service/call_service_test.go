@@ -65,6 +65,12 @@ func (p *fakeCallPlayer) Stop() {
 	}
 }
 
+func (p *fakeCallPlayer) isStopped() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.source == nil
+}
+
 func (p *fakeCallPlayer) finish() {
 	p.mu.Lock()
 	source := p.source
@@ -132,6 +138,15 @@ func (s *fakeCallSession) Hangup() error {
 	default:
 	}
 	return nil
+}
+
+func (s *fakeCallSession) endRemotely(reason string) {
+	s.mu.Lock()
+	onEnd := s.onEnd
+	s.mu.Unlock()
+	if onEnd != nil {
+		onEnd(reason)
+	}
 }
 
 func (s *fakeCallSession) currentPlayer() *fakeCallPlayer {
@@ -464,6 +479,98 @@ func TestRingCallPlaysAudioAndHangsUpAfterPlayback(t *testing.T) {
 	}
 	if !audioSource.isClosed() {
 		t.Fatal("audio source was not closed")
+	}
+}
+
+func TestRingCallWithoutAudioHangsUpWhenPeerAnswers(t *testing.T) {
+	session := newFakeCallSession(true)
+	openAudioCalls := 0
+	service := &callService{
+		loggerWrapper: logger_wrapper.NewLoggerManager(&config.Config{
+			LogDirectory: t.TempDir(),
+		}),
+		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
+			return nil, nil
+		},
+		isOnWhatsAppFn: canonicalRingTargetLookup,
+		openRingAudioSourceFn: func(string) (meowcaller.AudioSource, func(), error) {
+			openAudioCalls++
+			return nil, nil, errors.New("audio loader must not run")
+		},
+		placeRingCallFn: func(context.Context, string, string) (ringCallSession, error) {
+			return session, nil
+		},
+	}
+
+	if err := service.RingCall(
+		&RingCallStruct{Number: "5511999999999@s.whatsapp.net", DurationSeconds: 1},
+		&instance_model.Instance{Id: "test-instance"},
+	); err != nil {
+		t.Fatalf("RingCall() error = %v", err)
+	}
+
+	select {
+	case <-session.hungUp:
+	case <-time.After(time.Second):
+		t.Fatal("ring-only call did not hang up after peer answered")
+	}
+	if got := session.hangupCount(); got != 1 {
+		t.Fatalf("Hangup() calls = %d, want 1", got)
+	}
+	if openAudioCalls != 0 {
+		t.Fatalf("audio loader calls = %d, want 0", openAudioCalls)
+	}
+	if session.currentPlayer() != nil {
+		t.Fatal("ring-only call unexpectedly created an audio player")
+	}
+}
+
+func TestRingCallRemoteEndDuringPlaybackStopsPlayerAndCleansUp(t *testing.T) {
+	session := newFakeCallSession(true)
+	audioSource := &fakeRingAudioSource{}
+	cleanupDone := make(chan struct{}, 1)
+	service := &callService{
+		loggerWrapper: logger_wrapper.NewLoggerManager(&config.Config{
+			LogDirectory: t.TempDir(),
+		}),
+		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
+			return nil, nil
+		},
+		isOnWhatsAppFn: canonicalRingTargetLookup,
+		openRingAudioSourceFn: func(string) (meowcaller.AudioSource, func(), error) {
+			return audioSource, func() { cleanupDone <- struct{}{} }, nil
+		},
+		placeRingCallFn: func(context.Context, string, string) (ringCallSession, error) {
+			return session, nil
+		},
+	}
+
+	if err := service.RingCall(
+		&RingCallStruct{
+			Number:          "5511999999999@s.whatsapp.net",
+			DurationSeconds: 1,
+			AudioURL:        "https://cdn.example.com/greeting.wav",
+		},
+		&instance_model.Instance{Id: "test-instance"},
+	); err != nil {
+		t.Fatalf("RingCall() error = %v", err)
+	}
+	player := waitForPlayer(t, session)
+
+	session.endRemotely("peer_hangup")
+	select {
+	case <-cleanupDone:
+	case <-time.After(time.Second):
+		t.Fatal("remote end did not clean up audio resources")
+	}
+	if got := session.hangupCount(); got != 0 {
+		t.Fatalf("Hangup() calls = %d, want 0 after remote end", got)
+	}
+	if !audioSource.isClosed() {
+		t.Fatal("audio source was not closed after remote end")
+	}
+	if !player.isStopped() {
+		t.Fatal("player was not stopped after remote end")
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	logger_wrapper "github.com/evolution-foundation/evolution-go/pkg/logger"
 	"github.com/purpshell/meowcaller"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -166,6 +167,17 @@ func waitForPlayer(t *testing.T, session *fakeCallSession) *fakeCallPlayer {
 	}
 }
 
+func canonicalRingTargetLookup(_ context.Context, _ *whatsmeow.Client, phones []string) ([]types.IsOnWhatsAppResponse, error) {
+	if len(phones) != 1 {
+		return nil, errors.New("expected one phone")
+	}
+	return []types.IsOnWhatsAppResponse{{
+		Query: phones[0],
+		JID:   types.NewJID(phones[0], types.DefaultUserServer),
+		IsIn:  true,
+	}}, nil
+}
+
 func TestNormalizeRingDurationSeconds(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -202,6 +214,94 @@ func TestRingCallRejectsInvalidTargetBeforeConnecting(t *testing.T) {
 	)
 	if !errors.Is(err, ErrInvalidRingTarget) {
 		t.Fatalf("RingCall() error = %v, want %v", err, ErrInvalidRingTarget)
+	}
+}
+
+func TestResolveRingTargetUsesWhatsAppCanonicalJID(t *testing.T) {
+	service := &callService{
+		isOnWhatsAppFn: func(_ context.Context, _ *whatsmeow.Client, phones []string) ([]types.IsOnWhatsAppResponse, error) {
+			if len(phones) != 1 || phones[0] != "11987654321" {
+				t.Fatalf("IsOnWhatsApp() phones = %#v, want local number", phones)
+			}
+			return []types.IsOnWhatsAppResponse{{
+				Query: phones[0],
+				JID:   types.NewJID("5511987654321", types.DefaultUserServer),
+				IsIn:  true,
+			}}, nil
+		},
+	}
+
+	got, err := service.resolveRingTarget(
+		context.Background(),
+		nil,
+		"11987654321@s.whatsapp.net",
+	)
+	if err != nil {
+		t.Fatalf("resolveRingTarget() error = %v", err)
+	}
+	if got != "5511987654321@s.whatsapp.net" {
+		t.Fatalf("resolveRingTarget() = %q, want canonical WhatsApp JID", got)
+	}
+}
+
+func TestResolveRingTargetRejectsNumberOutsideWhatsApp(t *testing.T) {
+	service := &callService{
+		isOnWhatsAppFn: func(_ context.Context, _ *whatsmeow.Client, phones []string) ([]types.IsOnWhatsAppResponse, error) {
+			return []types.IsOnWhatsAppResponse{{
+				Query: phones[0],
+				JID:   types.NewJID(phones[0], types.DefaultUserServer),
+				IsIn:  false,
+			}}, nil
+		},
+	}
+
+	_, err := service.resolveRingTarget(
+		context.Background(),
+		nil,
+		"11987654321@s.whatsapp.net",
+	)
+	if !errors.Is(err, ErrInvalidRingTarget) {
+		t.Fatalf("resolveRingTarget() error = %v, want %v", err, ErrInvalidRingTarget)
+	}
+}
+
+func TestRingCallPlacesOfferWithResolvedCanonicalTarget(t *testing.T) {
+	session := newFakeCallSession(true)
+	placed := make(chan string, 1)
+	service := &callService{
+		loggerWrapper: logger_wrapper.NewLoggerManager(&config.Config{
+			LogDirectory: t.TempDir(),
+		}),
+		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
+			return nil, nil
+		},
+		isOnWhatsAppFn: func(_ context.Context, _ *whatsmeow.Client, phones []string) ([]types.IsOnWhatsAppResponse, error) {
+			return []types.IsOnWhatsAppResponse{{
+				Query: phones[0],
+				JID:   types.NewJID("5511987654321", types.DefaultUserServer),
+				IsIn:  true,
+			}}, nil
+		},
+		placeRingCallFn: func(_ context.Context, _, target string) (ringCallSession, error) {
+			placed <- target
+			return session, nil
+		},
+	}
+
+	if err := service.RingCall(
+		&RingCallStruct{Number: "11987654321", DurationSeconds: 1},
+		&instance_model.Instance{Id: "test-instance"},
+	); err != nil {
+		t.Fatalf("RingCall() error = %v", err)
+	}
+
+	select {
+	case got := <-placed:
+		if got != "5511987654321@s.whatsapp.net" {
+			t.Fatalf("Call() target = %q, want resolved canonical JID", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for resolved call placement")
 	}
 }
 
@@ -310,6 +410,7 @@ func TestRingCallPlaysAudioAndHangsUpAfterPlayback(t *testing.T) {
 		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
 			return nil, nil
 		},
+		isOnWhatsAppFn: canonicalRingTargetLookup,
 		openRingAudioSourceFn: func(rawURL string) (meowcaller.AudioSource, func(), error) {
 			if rawURL != "https://cdn.example.com/greeting.wav" {
 				t.Fatalf("audio URL = %q, want configured URL", rawURL)
@@ -387,6 +488,7 @@ func TestRingCallQueuesJobsPerInstanceInFIFO(t *testing.T) {
 		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
 			return nil, nil
 		},
+		isOnWhatsAppFn: canonicalRingTargetLookup,
 		openRingAudioSourceFn: func(string) (meowcaller.AudioSource, func(), error) {
 			return &fakeRingAudioSource{}, func() {}, nil
 		},
@@ -447,6 +549,7 @@ func TestRingCallQueuesDifferentInstancesIndependently(t *testing.T) {
 		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
 			return nil, nil
 		},
+		isOnWhatsAppFn: canonicalRingTargetLookup,
 		openRingAudioSourceFn: func(string) (meowcaller.AudioSource, func(), error) {
 			return &fakeRingAudioSource{}, func() {}, nil
 		},
@@ -500,6 +603,7 @@ func TestRingCallContinuesQueueAfterFailure(t *testing.T) {
 		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
 			return nil, nil
 		},
+		isOnWhatsAppFn: canonicalRingTargetLookup,
 		placeRingCallFn: func(_ context.Context, _, target string) (ringCallSession, error) {
 			if target == firstTarget {
 				close(firstStarted)
@@ -559,6 +663,7 @@ func TestRingCallRejectsWhenQueueIsFull(t *testing.T) {
 		ensureClientConnectedFn: func(string) (*whatsmeow.Client, error) {
 			return nil, nil
 		},
+		isOnWhatsAppFn: canonicalRingTargetLookup,
 		openRingAudioSourceFn: func(string) (meowcaller.AudioSource, func(), error) {
 			return &fakeRingAudioSource{}, func() {}, nil
 		},

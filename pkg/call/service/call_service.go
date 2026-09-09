@@ -62,6 +62,7 @@ type callService struct {
 	ensureClientConnectedFn func(instanceId string) (*whatsmeow.Client, error)
 	openRingAudioSourceFn   func(string) (meowcaller.AudioSource, func(), error)
 	placeRingCallFn         func(context.Context, string, string) (ringCallSession, error)
+	isOnWhatsAppFn          func(context.Context, *whatsmeow.Client, []string) ([]types.IsOnWhatsAppResponse, error)
 	ringQueuesMu            sync.Mutex
 	ringQueues              map[string]*ringCallQueue
 }
@@ -402,6 +403,43 @@ func (c *callService) placeRingCall(ctx context.Context, instanceID, target stri
 	return meowCallSessionAdapter{call: call}, nil
 }
 
+func (c *callService) resolveRingTarget(ctx context.Context, client *whatsmeow.Client, target string) (string, error) {
+	jid, ok := utils.ParseJID(target)
+	if !ok || (jid.Server != types.DefaultUserServer && jid.Server != types.HiddenUserServer) {
+		return "", ErrInvalidRingTarget
+	}
+	jid = utils.CanonicalJID(jid)
+	if jid.Server == types.HiddenUserServer {
+		return jid.String(), nil
+	}
+
+	lookup := c.isOnWhatsAppFn
+	if lookup == nil {
+		lookup = func(ctx context.Context, client *whatsmeow.Client, phones []string) ([]types.IsOnWhatsAppResponse, error) {
+			return client.IsOnWhatsApp(ctx, phones)
+		}
+	}
+	if client == nil && c.isOnWhatsAppFn == nil {
+		return "", errors.New("client unavailable while resolving call target")
+	}
+
+	results, err := lookup(ctx, client, []string{jid.User})
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve call target: %w", err)
+	}
+	for _, result := range results {
+		if !result.IsIn || result.JID.IsEmpty() {
+			continue
+		}
+		resolved := utils.CanonicalJID(result.JID)
+		if resolved.Server != types.DefaultUserServer && resolved.Server != types.HiddenUserServer {
+			continue
+		}
+		return resolved.String(), nil
+	}
+	return "", fmt.Errorf("%w: number is not registered on WhatsApp", ErrInvalidRingTarget)
+}
+
 func (c *callService) RejectCall(data *RejectCallStruct, instance *instance_model.Instance) error {
 	client, err := c.ensureClientConnected(instance.Id)
 	if err != nil {
@@ -521,7 +559,13 @@ func (c *callService) executeRingCall(job ringCallJob) error {
 		}
 	}
 
-	if _, err := c.ensureClientConnected(job.instanceID); err != nil {
+	client, err := c.ensureClientConnected(job.instanceID)
+	if err != nil {
+		cleanupAudio()
+		return err
+	}
+	resolvedTarget, err := c.resolveRingTarget(context.Background(), client, job.target)
+	if err != nil {
 		cleanupAudio()
 		return err
 	}
@@ -529,7 +573,7 @@ func (c *callService) executeRingCall(job ringCallJob) error {
 	// WARNING: outbound calls to unknown contacts may trigger WhatsApp's
 	// Reach-out Time-lock and can ban the connected number. Keep this endpoint
 	// isolated from campaigns, workers and other automated production flows.
-	call, err := c.placeRingCall(context.Background(), job.instanceID, job.target)
+	call, err := c.placeRingCall(context.Background(), job.instanceID, resolvedTarget)
 	if err != nil {
 		cleanupAudio()
 		return err

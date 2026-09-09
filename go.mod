@@ -2,7 +2,7 @@ module github.com/evolution-foundation/evolution-go
 
 go 1.25.0
 
-replace github.com/purpshell/meowcaller => github.com/thealvez/meowcaller v0.0.0-20260909123538-5abcafcc6d4a
+replace github.com/purpshell/meowcaller => github.com/thealvez/meowcaller v0.0.0-20260909125226-4aa3e1360f17
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2

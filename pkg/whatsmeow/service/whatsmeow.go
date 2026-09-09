@@ -24,6 +24,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/patrickmn/go-cache"
 	"github.com/purpshell/meowcaller"
+	"github.com/rs/zerolog"
 	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
@@ -498,7 +499,14 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 	// meowcaller installs low-level call/ack interceptors and must wrap the
 	// whatsmeow client before Connect starts its receive loop.
 	if w.callClients != nil {
-		w.callClients.Store(cd.Instance.Id, meowcaller.NewClient(client))
+		callLogger := zerolog.New(os.Stdout).
+			Level(zerolog.InfoLevel).
+			With().
+			Timestamp().
+			Str("component", "meowcaller").
+			Str("instance_id", cd.Instance.Id).
+			Logger()
+		w.callClients.Store(cd.Instance.Id, meowcaller.NewClient(client, meowcaller.WithLogger(callLogger)))
 	}
 	// Sem isso, a sincronização inicial completa do app-state (pareamento
 	// novo, ou qualquer FetchAppState com fullSync=true) aplica as mutações

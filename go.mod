@@ -2,6 +2,8 @@ module github.com/evolution-foundation/evolution-go
 
 go 1.25.0
 
+replace github.com/purpshell/meowcaller => github.com/thealvez/meowcaller v0.0.0-20260909114420-4400ca5f0431
+
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/chai2010/webp v1.1.1

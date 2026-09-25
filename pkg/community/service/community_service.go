@@ -21,7 +21,7 @@ type CommunityService interface {
 }
 
 type communityService struct {
-	clientPointer    map[string]*whatsmeow.Client
+	clientPointer    *whatsmeow_service.ClientRegistry
 	whatsmeowService whatsmeow_service.WhatsmeowService
 	loggerWrapper    *logger_wrapper.LoggerManager
 }
@@ -36,7 +36,7 @@ type AddParticipantStruct struct {
 }
 
 func (c *communityService) ensureClientConnected(instanceId string) (*whatsmeow.Client, error) {
-	client := c.clientPointer[instanceId]
+	client := c.clientPointer.GetClient(instanceId)
 	c.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking client connection status - Client exists: %v", instanceId, client != nil)
 
 	if client == nil {
@@ -50,7 +50,7 @@ func (c *communityService) ensureClientConnected(instanceId string) (*whatsmeow.
 		c.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Instance started, waiting 2 seconds...", instanceId)
 		time.Sleep(2 * time.Second)
 
-		client = c.clientPointer[instanceId]
+		client = c.clientPointer.GetClient(instanceId)
 		c.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking new client - Exists: %v, Connected: %v",
 			instanceId,
 			client != nil,
@@ -157,7 +157,7 @@ func (c *communityService) CommunityRemove(data *AddParticipantStruct, instance 
 }
 
 func NewCommunityService(
-	clientPointer map[string]*whatsmeow.Client,
+	clientPointer *whatsmeow_service.ClientRegistry,
 	whatsmeowService whatsmeow_service.WhatsmeowService,
 	loggerWrapper *logger_wrapper.LoggerManager,
 ) CommunityService {

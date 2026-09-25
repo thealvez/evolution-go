@@ -26,7 +26,7 @@ type LabelService interface {
 }
 
 type labelService struct {
-	clientPointer    map[string]*whatsmeow.Client
+	clientPointer    *whatsmeow_service.ClientRegistry
 	whatsmeowService whatsmeow_service.WhatsmeowService
 	labelRepository  label_repository.LabelRepository
 	loggerWrapper    *logger_wrapper.LoggerManager
@@ -51,7 +51,7 @@ type EditLabelStruct struct {
 }
 
 func (l *labelService) ensureClientConnected(instanceId string) (*whatsmeow.Client, error) {
-	client := l.clientPointer[instanceId]
+	client := l.clientPointer.GetClient(instanceId)
 	l.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking client connection status - Client exists: %v", instanceId, client != nil)
 
 	if client == nil {
@@ -65,7 +65,7 @@ func (l *labelService) ensureClientConnected(instanceId string) (*whatsmeow.Clie
 		l.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Instance started, waiting 2 seconds...", instanceId)
 		time.Sleep(2 * time.Second)
 
-		client = l.clientPointer[instanceId]
+		client = l.clientPointer.GetClient(instanceId)
 		l.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking new client - Exists: %v, Connected: %v",
 			instanceId,
 			client != nil,
@@ -251,7 +251,7 @@ func (l *labelService) ResyncAppState(instance *instance_model.Instance) error {
 }
 
 func NewLabelService(
-	clientPointer map[string]*whatsmeow.Client,
+	clientPointer *whatsmeow_service.ClientRegistry,
 	whatsmeowService whatsmeow_service.WhatsmeowService,
 	labelRepository label_repository.LabelRepository,
 	loggerWrapper *logger_wrapper.LoggerManager,

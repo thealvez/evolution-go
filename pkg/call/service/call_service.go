@@ -56,7 +56,7 @@ var (
 )
 
 type callService struct {
-	clientPointer           map[string]*whatsmeow.Client
+	clientPointer           *whatsmeow_service.ClientRegistry
 	whatsmeowService        whatsmeow_service.WhatsmeowService
 	loggerWrapper           *logger_wrapper.LoggerManager
 	ensureClientConnectedFn func(instanceId string) (*whatsmeow.Client, error)
@@ -346,7 +346,7 @@ func (c *callService) ensureClientConnected(instanceId string) (*whatsmeow.Clien
 	if c.ensureClientConnectedFn != nil {
 		return c.ensureClientConnectedFn(instanceId)
 	}
-	client := c.clientPointer[instanceId]
+	client := c.clientPointer.GetClient(instanceId)
 	c.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking client connection status - Client exists: %v", instanceId, client != nil)
 
 	if client == nil {
@@ -360,7 +360,7 @@ func (c *callService) ensureClientConnected(instanceId string) (*whatsmeow.Clien
 		c.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Instance started, waiting 2 seconds...", instanceId)
 		time.Sleep(2 * time.Second)
 
-		client = c.clientPointer[instanceId]
+		client = c.clientPointer.GetClient(instanceId)
 		c.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking new client - Exists: %v, Connected: %v",
 			instanceId,
 			client != nil,
@@ -680,7 +680,7 @@ func (c *callService) RingCall(data *RingCallStruct, instance *instance_model.In
 }
 
 func NewCallService(
-	clientPointer map[string]*whatsmeow.Client,
+	clientPointer *whatsmeow_service.ClientRegistry,
 	whatsmeowService whatsmeow_service.WhatsmeowService,
 	loggerWrapper *logger_wrapper.LoggerManager,
 ) CallService {

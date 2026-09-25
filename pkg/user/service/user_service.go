@@ -35,7 +35,7 @@ type UserService interface {
 }
 
 type userService struct {
-	clientPointer    map[string]*whatsmeow.Client
+	clientPointer    *whatsmeow_service.ClientRegistry
 	whatsmeowService whatsmeow_service.WhatsmeowService
 	loggerWrapper    *logger_wrapper.LoggerManager
 }
@@ -111,7 +111,7 @@ type PrivacyStruct struct {
 }
 
 func (u *userService) ensureClientConnected(instanceId string) (*whatsmeow.Client, error) {
-	client := u.clientPointer[instanceId]
+	client := u.clientPointer.GetClient(instanceId)
 	u.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking client connection status - Client exists: %v", instanceId, client != nil)
 
 	if client == nil {
@@ -125,7 +125,7 @@ func (u *userService) ensureClientConnected(instanceId string) (*whatsmeow.Clien
 		u.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Instance started, waiting 2 seconds...", instanceId)
 		time.Sleep(2 * time.Second)
 
-		client = u.clientPointer[instanceId]
+		client = u.clientPointer.GetClient(instanceId)
 		u.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking new client - Exists: %v, Connected: %v",
 			instanceId,
 			client != nil,
@@ -576,7 +576,7 @@ func (u *userService) SetProfileStatus(data *SetProfileStatusStruct, instance *i
 }
 
 func NewUserService(
-	clientPointer map[string]*whatsmeow.Client,
+	clientPointer *whatsmeow_service.ClientRegistry,
 	whatsmeowService whatsmeow_service.WhatsmeowService,
 	loggerWrapper *logger_wrapper.LoggerManager,
 ) UserService {

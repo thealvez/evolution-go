@@ -149,6 +149,19 @@ func (u *userService) ensureClientConnected(instanceId string) (*whatsmeow.Clien
 	return client, nil
 }
 
+// parseRawJID parses a user-supplied number for RAW IQ queries (usync user
+// info, profile picture, blocklist). ParseJID/CreateJID prefix phone numbers
+// with "+" to match the IsOnWhatsApp convention; message sending tolerates
+// that, but a "+JID" target in a raw IQ is silently dropped by the server and
+// the request only fails after the 75s IQ timeout ("info query timed out").
+func parseRawJID(arg string) (types.JID, bool) {
+	jid, ok := utils.ParseJID(arg)
+	if !ok {
+		return jid, false
+	}
+	return utils.CanonicalJID(jid), true
+}
+
 func (u *userService) GetUser(data *CheckUserStruct, instance *instance_model.Instance) (*UserCollection, error) {
 	client, err := u.ensureClientConnected(instance.Id)
 	if err != nil {
@@ -157,7 +170,7 @@ func (u *userService) GetUser(data *CheckUserStruct, instance *instance_model.In
 
 	var jids []types.JID
 	for _, arg := range data.Number {
-		jid, ok := utils.ParseJID(arg)
+		jid, ok := parseRawJID(arg)
 		if !ok {
 			return nil, errors.New("invalid phone number")
 		}
@@ -366,7 +379,7 @@ func (u *userService) GetAvatar(data *GetAvatarStruct, instance *instance_model.
 		return nil, errors.New("client is not logged in to WhatsApp")
 	}
 
-	jid, ok := utils.ParseJID(data.Number)
+	jid, ok := parseRawJID(data.Number)
 	if !ok {
 		return nil, errors.New("invalid phone number")
 	}
@@ -474,7 +487,7 @@ func (u *userService) BlockContact(data *BlockStruct, instance *instance_model.I
 		return nil, err
 	}
 
-	jid, ok := utils.ParseJID(data.Number)
+	jid, ok := parseRawJID(data.Number)
 	if !ok {
 		return nil, errors.New("invalid phone number")
 	}
@@ -493,7 +506,7 @@ func (u *userService) UnlockContact(data *BlockStruct, instance *instance_model.
 		return nil, err
 	}
 
-	jid, ok := utils.ParseJID(data.Number)
+	jid, ok := parseRawJID(data.Number)
 	if !ok {
 		return nil, errors.New("invalid phone number")
 	}

@@ -79,6 +79,40 @@ type clientVersion struct {
 	Patch int
 }
 
+var (
+	whatsappVersionOnce      sync.Once
+	effectiveWhatsAppVersion store.WAVersionContainer
+	whatsappVersionMu        sync.Mutex
+)
+
+func applyWhatsAppVersion(version clientVersion) store.WAVersionContainer {
+	whatsappVersionMu.Lock()
+	defer whatsappVersionMu.Unlock()
+
+	effective := store.WAVersionContainer{
+		uint32(version.Major),
+		uint32(version.Minor),
+		uint32(version.Patch),
+	}
+	store.SetWAVersion(effective)
+
+	if store.DeviceProps.Version == nil {
+		store.DeviceProps.Version = &waCompanionReg.DeviceProps_AppVersion{}
+	}
+	store.DeviceProps.Version.Primary = proto.Uint32(effective[0])
+	store.DeviceProps.Version.Secondary = proto.Uint32(effective[1])
+	store.DeviceProps.Version.Tertiary = proto.Uint32(effective[2])
+
+	return store.GetWAVersion()
+}
+
+func configureWhatsAppVersion(version clientVersion) store.WAVersionContainer {
+	whatsappVersionOnce.Do(func() {
+		effectiveWhatsAppVersion = applyWhatsAppVersion(version)
+	})
+	return effectiveWhatsAppVersion
+}
+
 // sqlStoreState owns the single whatsmeow SQL container used by this process.
 // A Container is designed to hold multiple isolated WhatsApp device sessions,
 // so creating one per reconnect only creates redundant database pools.
@@ -493,17 +527,8 @@ func (w whatsmeowService) startClientSession(cd *ClientData, session *InstanceSe
 	if w.config.WhatsappVersionMajor != 0 && w.config.WhatsappVersionMinor != 0 && w.config.WhatsappVersionPatch != 0 {
 		w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Setting whatsapp version to %d.%d.%d", cd.Instance.Id, w.config.WhatsappVersionMajor, w.config.WhatsappVersionMinor, w.config.WhatsappVersionPatch)
 		version.Major = w.config.WhatsappVersionMajor
-		if err == nil {
-			store.DeviceProps.Version.Primary = proto.Uint32(uint32(version.Major))
-		}
 		version.Minor = w.config.WhatsappVersionMinor
-		if err == nil {
-			store.DeviceProps.Version.Secondary = proto.Uint32(uint32(version.Minor))
-		}
 		version.Patch = w.config.WhatsappVersionPatch
-		if err == nil {
-			store.DeviceProps.Version.Tertiary = proto.Uint32(uint32(version.Patch))
-		}
 	} else {
 		// Try to fetch version from WhatsApp Web
 		webVersion, err := fetchWhatsAppWebVersion()
@@ -512,11 +537,19 @@ func (w whatsmeowService) startClientSession(cd *ClientData, session *InstanceSe
 		} else {
 			w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Setting whatsapp version from web to %d.%d.%d", cd.Instance.Id, webVersion.Major, webVersion.Minor, webVersion.Patch)
 			version = *webVersion
-			store.DeviceProps.Version.Primary = proto.Uint32(uint32(version.Major))
-			store.DeviceProps.Version.Secondary = proto.Uint32(uint32(version.Minor))
-			store.DeviceProps.Version.Tertiary = proto.Uint32(uint32(version.Patch))
 		}
 	}
+	if version.Major <= 0 || version.Minor <= 0 || version.Patch <= 0 {
+		bundledVersion := store.GetWAVersion()
+		version = clientVersion{
+			Major: int(bundledVersion[0]),
+			Minor: int(bundledVersion[1]),
+			Patch: int(bundledVersion[2]),
+		}
+		w.loggerWrapper.GetLogger(cd.Instance.Id).LogWarn("[%s] Using bundled WhatsApp handshake version %s", cd.Instance.Id, bundledVersion.String())
+	}
+	effectiveVersion := configureWhatsAppVersion(version)
+	w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Effective WhatsApp handshake version is %s", cd.Instance.Id, effectiveVersion.String())
 
 	// 🔒 FIX: Sempre criar logger, mesmo que WaDebug esteja vazio
 	// Usar "INFO" como nível mínimo para garantir que logs importantes apareçam

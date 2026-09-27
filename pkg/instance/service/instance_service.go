@@ -89,8 +89,11 @@ type StatusStruct struct {
 }
 
 type QrcodeStruct struct {
-	Qrcode string `json:"qrcode"`
-	Code   string `json:"code"`
+	Qrcode       string `json:"qrcode"`
+	Code         string `json:"code"`
+	Base64       string `json:"base64,omitempty"`
+	QRCode       string `json:"qrCode,omitempty"`
+	QRCodeBase64 string `json:"qr_code_base64,omitempty"`
 	// Passkey ceremony fields. Populated when the account requires a WebAuthn
 	// passkey to finish linking (no QR to scan at that point). The manager uses
 	// PasskeyStage to switch its UI and PasskeyOpenUrl for the

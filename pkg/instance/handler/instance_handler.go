@@ -286,7 +286,32 @@ func (i *instanceHandler) Qr(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "success", "data": qrcode})
+	ctx.JSON(http.StatusOK, qrSuccessResponse(qrcode))
+}
+
+// qrSuccessResponse preserves the native Evolution Go contract under data while
+// exposing additive aliases used by Evolution API integrations in the wild.
+// The QR is already authorized by the instance token; aliases only prevent
+// clients from getting stuck when they expect another established field name.
+func qrSuccessResponse(qrcode *instance_service.QrcodeStruct) gin.H {
+	compatible := *qrcode
+	compatible.Base64 = qrcode.Qrcode
+	compatible.QRCode = qrcode.Qrcode
+	compatible.QRCodeBase64 = qrcode.Qrcode
+
+	return gin.H{
+		"message":        "success",
+		"data":           compatible,
+		"base64":         qrcode.Qrcode,
+		"qrCode":         qrcode.Qrcode,
+		"qr_code_base64": qrcode.Qrcode,
+		"code":           qrcode.Code,
+		"qrcode": gin.H{
+			"base64": qrcode.Qrcode,
+			"code":   qrcode.Code,
+			"qrcode": qrcode.Qrcode,
+		},
+	}
 }
 
 // Request pairing code

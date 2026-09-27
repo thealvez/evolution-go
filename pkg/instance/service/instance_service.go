@@ -91,6 +91,8 @@ type StatusStruct struct {
 type QrcodeStruct struct {
 	Qrcode       string `json:"qrcode"`
 	Code         string `json:"code"`
+	LegacyQrcode string `json:"Qrcode,omitempty"`
+	LegacyCode   string `json:"Code,omitempty"`
 	Base64       string `json:"base64,omitempty"`
 	QRCode       string `json:"qrCode,omitempty"`
 	QRCodeBase64 string `json:"qr_code_base64,omitempty"`

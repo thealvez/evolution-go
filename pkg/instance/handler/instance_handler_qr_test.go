@@ -38,13 +38,16 @@ func TestQrSuccessResponsePreservesNativeContractAndAddsAliases(t *testing.T) {
 		t.Fatalf("data must be an object, got %T", body["data"])
 	}
 
-	for _, key := range []string{"qrcode", "base64", "qrCode", "qr_code_base64"} {
+	for _, key := range []string{"qrcode", "Qrcode", "base64", "qrCode", "qr_code_base64"} {
 		if got := data[key]; got != image {
 			t.Errorf("data.%s = %v, want synthetic image", key, got)
 		}
 	}
 	if got := data["code"]; got != code {
 		t.Errorf("data.code = %v, want %q", got, code)
+	}
+	if got := data["Code"]; got != code {
+		t.Errorf("data.Code = %v, want legacy %q", got, code)
 	}
 	for _, key := range []string{"base64", "qrCode", "qr_code_base64"} {
 		if got := body[key]; got != image {

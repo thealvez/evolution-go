@@ -295,6 +295,8 @@ func (i *instanceHandler) Qr(ctx *gin.Context) {
 // clients from getting stuck when they expect another established field name.
 func qrSuccessResponse(qrcode *instance_service.QrcodeStruct) gin.H {
 	compatible := *qrcode
+	compatible.LegacyQrcode = qrcode.Qrcode
+	compatible.LegacyCode = qrcode.Code
 	compatible.Base64 = qrcode.Qrcode
 	compatible.QRCode = qrcode.Qrcode
 	compatible.QRCodeBase64 = qrcode.Qrcode
